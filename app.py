@@ -1,7 +1,7 @@
 import streamlit as st
-import streamlit_authenticator as stauth  # Добавляем для аутентификации
-import yaml  # Добавляем для работы с config.yaml
-from yaml.loader import SafeLoader  # Добавляем для загрузки YAML
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -21,7 +21,7 @@ SUMMONER_NAME_BY_URL = "https://europe.api.riotgames.com/riot/account/v1/account
 MATCH_HISTORY_URL = "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/{}/ids?start=0&count=100&api_key=RGAPI-2364bf09-8116-4d02-9dde-e2ed7cde4af8"
 MATCH_BASIC_URL = "https://europe.api.riotgames.com/lol/match/v5/matches/{}?api_key=RGAPI-2364bf09-8116-4d02-9dde-e2ed7cde4af8"
 
-# Список URL для разных этапов турнира (замени на свои ссылки)
+# Список URL для разных этапов турнира HLL
 TOURNAMENT_URLS = {
     "Winter Split": {
         "match_history": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Split/Match_History",
@@ -33,14 +33,14 @@ TOURNAMENT_URLS = {
     }
 }
 
-# Team roster for GMS (замени на реальных игроков Gamespace)
+# Team roster for Gamespace (GMS)
 team_rosters = {
     "Gamespace": {
-        "Aytekn": {"game_name": ["AyteknnnN777"], "tag_line": ["777"], "role": "TOP"},
-        "Pallet": {"game_name": ["KC Bo", "yiqunsb"], "tag_line": ["2106", "KR21"], "role": "JUNGLE"},
-        "Tsiperakos": {"game_name": ["Tsiperakos", "Tsiper"], "tag_line": ["MID", "tsprk"], "role": "MIDDLE"},
-        "Kenal": {"game_name": ["Kenal", "Kaneki Kenal"], "tag_line": ["EUW", "EUW0"], "role": "BOTTOM"},
-        "Centu": {"game_name": ["ΣΑΝ ΚΡΟΥΑΣΑΝ", "Aim First"], "tag_line": ["Ker10", "001"], "role": "UTILITY"},
+        "Fornoreason": {"game_name": ["床前明月光疑是地上霜举头望明月低", "FornoReason"], "tag_line": ["CN1", "Gap"], "role": "TOP"},
+        "White": {"game_name": ["Alsabr"], "tag_line": ["314"], "role": "JUNGLE"},
+        "Simpli": {"game_name": ["Simpli"], "tag_line": ["Jasmi"], "role": "MIDDLE"},
+        "DenVoksne": {"game_name": ["Ignacarious", "Mαster Oogwαy"], "tag_line": ["5232", "EUW"], "role": "BOTTOM"},
+        "seaz": {"game_name": ["고군분투일취월장", "ASV13 08"], "tag_line": ["KR6", "1130"], "role": "UTILITY"},
     }
 }
 
@@ -65,14 +65,8 @@ def normalize_team_name(team_name):
     team_exceptions = {
         "gamespace": "Gamespace",
         "gms": "Gamespace",
-        "gamespacelogo std": "Gamespace",
-        "actions per minute": "Actions Per Minute",
-        "gamespace mce": "Gamespace MCE",
-        "gamespace mediterranean college": "Gamespace Mediterranean College",
-        "hell zerolag esports": "Hell Zerolag Esports",
-        "team insidious": "Team Insidious",
-        "team paradox": "Team Paradox",
-        "team phantasmo": "Team Phantasmo",
+        "gamespace logo std": "Gamespace",
+        # Добавьте другие команды HLL при необходимости
     }
 
     team_name_clean = team_name.lower().replace("logo std", "").strip()
@@ -95,10 +89,10 @@ def fetch_match_history_data():
         'OpponentBlueBans': defaultdict(int),
         'OpponentRedBans': defaultdict(int),
         'DuoPicks': defaultdict(lambda: {'games': 0, 'wins': 0}),
-        'MatchResults': []  # Store match results
+        'MatchResults': []
     })
 
-    match_counter = defaultdict(int)  # Match counter for team pairs
+    match_counter = defaultdict(int)
 
     for tournament_name, urls in TOURNAMENT_URLS.items():
         url = urls["match_history"]
@@ -137,13 +131,11 @@ def fetch_match_history_data():
             if blue_team == "unknown" or red_team == "unknown":
                 continue
 
-            # Определение победителя
             winner_team = "unknown"
             result_elem = cols[4].select_one('a[title]') if len(cols) > 4 else None
             if result_elem and 'title' in result_elem.attrs:
                 winner_team = normalize_team_name(result_elem['title'].strip().lower().replace("||tooltip:", "").split("||")[0])
             else:
-                # Альтернативный способ: проверка текста результата (например, "1:0" или "0:1")
                 result_text = cols[4].text.strip().lower() if len(cols) > 4 else ""
                 if result_text == "1:0":
                     winner_team = blue_team
@@ -157,7 +149,6 @@ def fetch_match_history_data():
                 result_blue = 'Win' if winner_team == blue_team else 'Loss'
                 result_red = 'Win' if winner_team == red_team else 'Loss'
 
-            # Store match results with game number
             match_key = tuple(sorted([blue_team, red_team]))
             match_counter[match_key] += 1
             match_number = match_counter[match_key]
@@ -256,17 +247,14 @@ def fetch_first_bans_data():
             if not cols or len(cols) < 11:
                 continue
 
-            # Извлечение названий команд
             blue_team = "unknown blue"
             red_team = "unknown red"
 
-            # Пробуем извлечь из атрибута title
             if len(cols) > 1 and 'title' in cols[1].attrs:
                 blue_team = cols[1]['title'].strip().lower()
             if len(cols) > 2 and 'title' in cols[2].attrs:
                 red_team = cols[2]['title'].strip().lower()
 
-            # Если не нашли title, пробуем .to_hasTooltip
             if blue_team == "unknown blue":
                 blue_team_elem = cols[1].select_one('.to_hasTooltip') if len(cols) > 1 else None
                 if blue_team_elem and 'title' in blue_team_elem.attrs:
@@ -281,7 +269,6 @@ def fetch_first_bans_data():
                 elif red_team_elem:
                     red_team = red_team_elem.text.strip().lower()
 
-            # Если не нашли .to_hasTooltip, пробуем img alt
             if blue_team == "unknown blue":
                 blue_team_img = cols[1].select_one('img') if len(cols) > 1 else None
                 if blue_team_img and 'alt' in blue_team_img.attrs:
@@ -292,58 +279,40 @@ def fetch_first_bans_data():
                 if red_team_img and 'alt' in red_team_img.attrs:
                     red_team = red_team_img['alt'].strip().lower()
 
-            # Если ничего не нашли, пробуем текст ячейки
             if blue_team == "unknown blue":
                 blue_team = cols[1].text.strip().lower() if len(cols) > 1 else "unknown blue"
             if red_team == "unknown red":
                 red_team = cols[2].text.strip().lower() if len(cols) > 2 else "unknown red"
 
-            # Убедимся, что команда не пустая
             if not blue_team or blue_team.isspace():
                 blue_team = "unknown blue"
             if not red_team or red_team.isspace():
                 red_team = "unknown red"
 
-            # Нормализация
             blue_team = normalize_team_name(blue_team)
             red_team = normalize_team_name(red_team)
 
-            print(f"Normalized blue team: {blue_team}")
-            print(f"Normalized red team: {red_team}")
-
             if blue_team == "unknown" or red_team == "unknown":
-                print("Skipping row due to unknown team")
                 continue
 
-            # Извлечение первых трёх банов
             ban_columns = ['BB1', 'RB1', 'BB2', 'RB2', 'BB3', 'RB3']
             for i, ban_col in enumerate(ban_columns):
-                col_index = 5 + i  # BB1 начинается с cols[5]
+                col_index = 5 + i
                 ban_elem = cols[col_index].select_one('span.sprite.champion-sprite') if len(cols) > col_index else None
                 champion = get_champion(ban_elem) if ban_elem else None
-                if champion and champion != "N/A":  # Пропускаем "N/A"
+                if champion and champion != "N/A":
                     if ban_col.startswith('BB'):
                         team_data[blue_team]['BlueFirstBans'][champion] += 1
-                        print(f"Added {champion} to {blue_team} BlueFirstBans")
                     elif ban_col.startswith('RB'):
                         team_data[red_team]['RedFirstBans'][champion] += 1
-                        print(f"Added {champion} to {red_team} RedFirstBans")
-                else:
-                    print(f"No champion found for {ban_col} in match {blue_team} vs {red_team}")
-
-    # Отладочный вывод
-    for team in team_data:
-        print(f"Team: {team}")
-        print("  BlueFirstBans:", dict(team_data[team]['BlueFirstBans']))
-        print("  RedFirstBans:", dict(team_data[team]['RedFirstBans']))
 
     return dict(team_data)
 
 # Fetch draft data
 def fetch_draft_data():
     team_drafts = defaultdict(list)
-    match_counter = defaultdict(int)  # Match counter for each team pair
-    team_wins = defaultdict(int)  # Track wins for each team in a series
+    match_counter = defaultdict(int)
+    team_wins = defaultdict(int)
 
     for tournament_name, urls in TOURNAMENT_URLS.items():
         url = urls["picks_and_bans"]
@@ -361,25 +330,22 @@ def fetch_draft_data():
             continue
         
         for table in draft_tables:
-            rows = table.select('tr')[1:]  # Skip header
-            rows = list(reversed(rows))  # Reverse rows to process from oldest to newest
+            rows = table.select('tr')[1:]
+            rows = list(reversed(rows))
             
             for row in rows:
                 cols = row.select('td')
-                if len(cols) < 24:  # Minimum columns for a complete row
+                if len(cols) < 24:
                     continue
 
-                # Извлечение названий команд
                 blue_team = "unknown blue"
                 red_team = "unknown red"
 
-                # Пробуем извлечь из атрибута title ячейки
                 if len(cols) > 1 and 'title' in cols[1].attrs:
                     blue_team = cols[1]['title'].strip().lower()
                 if len(cols) > 2 and 'title' in cols[2].attrs:
                     red_team = cols[2]['title'].strip().lower()
 
-                # Если не нашли title, пробуем .to_hasTooltip
                 if blue_team == "unknown blue":
                     blue_team_elem = cols[1].select_one('.to_hasTooltip') if len(cols) > 1 else None
                     if blue_team_elem and 'title' in blue_team_elem.attrs:
@@ -394,7 +360,6 @@ def fetch_draft_data():
                     elif red_team_elem:
                         red_team = red_team_elem.text.strip().lower()
 
-                # Если не нашли .to_hasTooltip, пробуем img alt
                 if blue_team == "unknown blue":
                     blue_team_img = cols[1].select_one('img') if len(cols) > 1 else None
                     if blue_team_img and 'alt' in blue_team_img.attrs:
@@ -405,35 +370,25 @@ def fetch_draft_data():
                     if red_team_img and 'alt' in red_team_img.attrs:
                         red_team = red_team_img['alt'].replace('logo std', '').strip().lower()
 
-                # Если ничего не нашли, пробуем текст ячейки
                 if blue_team == "unknown blue":
                     blue_team = cols[1].text.strip().lower() if len(cols) > 1 else "unknown blue"
                 if red_team == "unknown red":
                     red_team = cols[2].text.strip().lower() if len(cols) > 2 else "unknown red"
 
-                # Убедимся, что команда не пустая
                 if not blue_team or blue_team.isspace():
                     blue_team = "unknown blue"
                 if not red_team or red_team.isspace():
                     red_team = "unknown red"
 
-                # Нормализация
                 blue_team = normalize_team_name(blue_team)
                 red_team = normalize_team_name(red_team)
 
-                # Отладочный вывод
-                print(f"Normalized blue team: {blue_team}")
-                print(f"Normalized red team: {red_team}")
-
                 if blue_team == "unknown" or red_team == "unknown":
-                    print("Skipping row due to unknown team")
                     continue
 
-                # Определение победителя по классу pbh-winner
                 winner_team = red_team if cols[2].get('class') and 'pbh-winner' in cols[2]['class'] else blue_team if cols[1].get('class') and 'pbh-winner' in cols[1]['class'] else None
                 winner_side = 'red' if winner_team == red_team else 'blue' if winner_team == blue_team else None
 
-                # Обновление счётчика побед
                 match_key = tuple(sorted([blue_team, red_team]))
                 match_counter[match_key] += 1
                 match_number = match_counter[match_key]
@@ -442,11 +397,9 @@ def fetch_draft_data():
                 elif winner_side == 'red':
                     team_wins[red_team] += 1
 
-                # Подсчёт побед для текущего матча
                 blue_wins = team_wins[blue_team]
                 red_wins = team_wins[red_team]
 
-                # Извлечение банов (BB1, RB1, BB2, RB2, BB3, RB3, RB4, BB4, RB5, BB5)
                 ban_indices = [5, 6, 7, 8, 9, 10, 15, 16, 17, 18]
                 blue_bans = []
                 red_bans = []
@@ -458,55 +411,47 @@ def fetch_draft_data():
                     else:
                         champ_span_alt = cols[idx].select_one('span.champion-sprite')
                         champ = champ_span_alt.get('title', 'N/A') if champ_span_alt else "N/A"
-                    if i % 2 == 0:  # Чётные индексы — баны Blue
+                    if i % 2 == 0:
                         blue_bans.append(champ)
-                    else:  # Нечётные индексы — баны Red
+                    else:
                         red_bans.append(champ)
 
-                # Извлечение пиков
                 roles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support']
                 blue_picks = []
                 red_picks = []
-                # BP1 (index 11)
                 pick_spans = cols[11].select('.pbh-cn')
                 if pick_spans:
                     champ_span = pick_spans[0]
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     blue_picks.append((champ, roles[0]))
-                # RP1-2 (index 12)
                 rp1_2 = cols[12].select('.pbh-cn')
                 for i, champ_span in enumerate(rp1_2[:2]):
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     red_picks.append((champ, roles[i]))
-                # BP2-3 (index 13)
                 bp2_3 = cols[13].select('.pbh-cn')
                 for i, champ_span in enumerate(bp2_3[:2]):
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     blue_picks.append((champ, roles[1 + i]))
-                # RP3 (index 14)
                 pick_spans = cols[14].select('.pbh-cn')
                 if pick_spans:
                     champ_span = pick_spans[0]
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     red_picks.append((champ, roles[2]))
-                # RP4 (index 19)
                 pick_spans = cols[19].select('.pbh-cn')
                 if pick_spans:
                     champ_span = pick_spans[0]
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     red_picks.append((champ, roles[3]))
-                # BP4-5 (index 20)
                 bp4_5 = cols[20].select('.pbh-cn')
                 for i, champ_span in enumerate(bp4_5[:2]):
                     nested_span = champ_span.select_one('.sprite.champion-sprite')
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     blue_picks.append((champ, roles[3 + i]))
-                # RP5 (index 21)
                 pick_spans = cols[21].select('.pbh-cn')
                 if pick_spans:
                     champ_span = pick_spans[0]
@@ -514,17 +459,14 @@ def fetch_draft_data():
                     champ = nested_span['title'] if nested_span and 'title' in nested_span.attrs else champ_span.get('data-champion', 'N/A')
                     red_picks.append((champ, roles[4]))
 
-                # Заполнение недостающих пиков
                 while len(blue_picks) < 5:
                     blue_picks.append(("N/A", roles[len(blue_picks)]))
                 while len(red_picks) < 5:
                     red_picks.append(("N/A", roles[len(red_picks)]))
 
-                # Извлечение ссылки на VOD
                 vod_elem = cols[23].select_one('a')
                 vod_link = vod_elem['href'] if vod_elem and 'href' in vod_elem.attrs else "N/A"
 
-                # Сохранение данных для Blue Team
                 draft_blue = {
                     'opponent': red_team,
                     'blue_team': blue_team,
@@ -543,7 +485,6 @@ def fetch_draft_data():
                 }
                 team_drafts[blue_team].append(draft_blue)
 
-                # Сохранение данных для Red Team
                 draft_red = {
                     'opponent': blue_team,
                     'blue_team': blue_team,
@@ -561,17 +502,6 @@ def fetch_draft_data():
                     'tournament': tournament_name
                 }
                 team_drafts[red_team].append(draft_red)
-
-    # Отладочный вывод
-    for team in team_drafts:
-        print(f"Team: {team}")
-        for draft in team_drafts[team]:
-            print(f"  Draft vs {draft['opponent']}:")
-            print(f"    Blue Bans: {draft['blue_bans']}")
-            print(f"    Red Bans: {draft['red_bans']}")
-            print(f"    Blue Picks: {draft['blue_picks']}")
-            print(f"    Red Picks: {draft['red_picks']}")
-            print(f"    Winner Side: {draft['winner_side']}")
 
     return dict(team_drafts)
 
@@ -636,19 +566,12 @@ def color_win_rate(value):
 
 # NEW: SoloQ functions
 def setup_google_sheets():
-    # Определяем scope
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-
-    # Получаем данные сервисного аккаунта из переменной окружения
     json_creds = os.getenv("GOOGLE_SHEETS_CREDS")
     if not json_creds:
         st.error("Не удалось загрузить учетные данные Google Sheets.")
         return None
-
-    # Парсим JSON-строку в словарь
     creds_dict = json.loads(json_creds)
-
-    # Авторизуемся с использованием словаря
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
     return client
@@ -671,7 +594,7 @@ def rate_limit_pause(start_time, request_count):
     return request_count, start_time
 
 def get_account_data(worksheet, game_name, tag_line):
-    game_ids = set(worksheet.col_values(2))  # Матч_айди из второй колонки
+    game_ids = set(worksheet.col_values(2))
     request_count = 0
     start_time = time.time()
 
@@ -754,23 +677,11 @@ def aggregate_soloq_data(spreadsheet, team_name):
 
 # Main Streamlit function with button navigation
 def main():
-    # Очистка старых данных
-    if 'match_history_data' in st.session_state:
-        del st.session_state.match_history_data
-    if 'first_bans_data' in st.session_state:
-        del st.session_state.first_bans_data
-    if 'draft_data' in st.session_state:
-        del st.session_state.draft_data
-    if 'soloq_data' in st.session_state:
-        del st.session_state.soloq_data
-
-    # Initialize session state for page navigation
     if 'current_page' not in st.session_state:
-        st.session_state.current_page = "HLL League Stats"
+        st.session_state.current_page = "Hellenic Legends League Stats"
 
     st.sidebar.title("Navigation")
     
-    # HLL Teams selection
     if 'match_history_data' not in st.session_state or 'first_bans_data' not in st.session_state or 'draft_data' not in st.session_state:
         with st.spinner("Loading data from Leaguepedia..."):
             st.session_state.match_history_data = fetch_match_history_data()
@@ -790,21 +701,15 @@ def main():
         st.warning("No teams found in the data.")
         return
 
-    selected_team = st.sidebar.selectbox("Select a HLL Team", teams, key="hll_team_select")
+    selected_team = st.sidebar.selectbox("Select a Hellenic Legends League Team", teams, key="hll_team_select")
 
-    # Button to switch to GMS SoloQ
-    if st.session_state.current_page == "HLL League Stats":
+    if st.session_state.current_page == "Hellenic Legends League Stats":
         if st.sidebar.button("Go to GMS SoloQ"):
             st.session_state.current_page = "GMS SoloQ"
             st.rerun()
 
-    # Добавляем логотип и текст внизу бокового меню
     st.sidebar.markdown("<hr style='border: 1px solid #333; margin: 20px 0;'>", unsafe_allow_html=True)
-    
-    # Логотип Gamespace
     st.sidebar.image("logo.webp", width=100, use_container_width=True)
-    
-    # Текст "by heovech"
     st.sidebar.markdown(
         """
         <div style="text-align: center; font-size: 14px; color: #888;">
@@ -814,14 +719,42 @@ def main():
         unsafe_allow_html=True
     )
 
-    # Render the appropriate page
-    if st.session_state.current_page == "HLL League Stats":
-        hll_league_page(selected_team)
+    if st.session_state.current_page == "Hellenic Legends League Stats":
+        hll_page(selected_team)
     elif st.session_state.current_page == "GMS SoloQ":
         soloq_page()
 
-def hll_league_page(selected_team):
-    st.title("HLL League 2025 Winter - Pick & Ban Statistics")
+def save_notes_data(data, team_name, filename_prefix="notes_data"):
+    filename = f"{filename_prefix}_{team_name}.json"
+    with open(filename, "w") as f:
+        json.dump(data, f)
+
+def load_notes_data(team_name, filename_prefix="notes_data"):
+    filename = f"{filename_prefix}_{team_name}.json"
+    default_data = {
+        "tables": [
+            [
+                ["", "Ban", ""],
+                ["", "Ban", ""],
+                ["", "Ban", ""],
+                ["", "Pick", ""],
+                ["", "Pick", ""],
+                ["", "Pick", ""],
+                ["", "Ban", ""],
+                ["", "Ban", ""],
+                ["", "Pick", ""],
+                ["", "Pick", ""]
+            ] for _ in range(6)
+        ],
+        "notes_text": ""
+    }
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
+            return json.load(f)
+    return default_data
+
+def hll_page(selected_team):
+    st.title("Hellenic Legends League 2025 Winter - Pick & Ban Statistics")
 
     normalized_selected_team = normalize_team_name(selected_team)
 
@@ -830,10 +763,11 @@ def hll_league_page(selected_team):
         with st.spinner("Updating data..."):
             st.session_state.match_history_data = fetch_match_history_data()
             st.session_state.first_bans_data = fetch_first_bans_data()
-            st.session_state.draft_data = fetch_draft_data()
+            if 'draft_data' not in st.session_state:
+                st.session_state.draft_data = {}
+            st.session_state.draft_data[normalized_selected_team] = fetch_draft_data()
         st.success("Data updated!")
 
-    # Initialize session state for button toggles if not exists
     if 'show_picks' not in st.session_state:
         st.session_state.show_picks = False
     if 'show_bans' not in st.session_state:
@@ -842,9 +776,10 @@ def hll_league_page(selected_team):
         st.session_state.show_duo_picks = False
     if 'show_drafts' not in st.session_state:
         st.session_state.show_drafts = False
+    if 'show_notes' not in st.session_state:
+        st.session_state.show_notes = False
 
-    # Button controls for main sections
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         if st.button("Picks", key="picks_btn"):
             st.session_state.show_picks = not st.session_state.show_picks
@@ -857,8 +792,10 @@ def hll_league_page(selected_team):
     with col4:
         if st.button("Drafts", key="drafts_btn"):
             st.session_state.show_drafts = not st.session_state.show_drafts
+    with col5:
+        if st.button("Notes", key="notes_btn"):
+            st.session_state.show_notes = not st.session_state.show_notes
 
-    # Display blocks based on button states
     team_info = st.session_state.match_history_data.get(normalized_selected_team, {})
     first_bans_info = st.session_state.first_bans_data.get(normalized_selected_team, {'BlueFirstBans': defaultdict(int), 'RedFirstBans': defaultdict(int)})
     roles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support']
@@ -1133,7 +1070,6 @@ def hll_league_page(selected_team):
         st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
         draft_data = st.session_state.draft_data.get(normalized_selected_team, [])
         if draft_data:
-            # Group drafts by match_key (team pair)
             drafts_by_match = {}
             for draft in draft_data:
                 if draft['blue_team'] == normalized_selected_team or draft['red_team'] == normalized_selected_team:
@@ -1142,22 +1078,18 @@ def hll_league_page(selected_team):
                         drafts_by_match[match_key] = []
                     drafts_by_match[match_key].append(draft)
 
-            # Sort matches by match_number (approximating week order)
             sorted_matches = sorted(drafts_by_match.items(), key=lambda x: min(d['match_number'] for d in x[1]))
 
-            # Display each match
             for match_key, match_drafts in sorted_matches:
                 blue_team = match_drafts[0]['blue_team']
                 red_team = match_drafts[0]['red_team']
                 st.subheader(f"{blue_team} vs {red_team}")
 
-                # Initialize session state for each game in this match
                 for draft in match_drafts:
                     game_key = f"show_game_{match_key}_{draft['match_number']}"
                     if game_key not in st.session_state:
                         st.session_state[game_key] = False
 
-                # Create buttons for each game
                 num_games = len(match_drafts)
                 game_cols = st.columns(num_games)
                 for i, draft in enumerate(match_drafts):
@@ -1166,7 +1098,6 @@ def hll_league_page(selected_team):
                         if st.button(f"Game {draft['match_number']}", key=f"game_btn_{match_key}_{draft['match_number']}"):
                             st.session_state[game_key] = not st.session_state[game_key]
 
-                # Display games that are toggled on
                 active_games = [draft for draft in match_drafts if st.session_state[f"show_game_{match_key}_{draft['match_number']}"]]
                 if active_games:
                     active_cols = st.columns(len(active_games))
@@ -1176,13 +1107,11 @@ def hll_league_page(selected_team):
                             st.write(f"Game {draft['match_number']}")
                             st.write(f"Result: {result}")
 
-                            # Determine the side of the selected team
                             is_selected_team_blue = (draft['blue_team'] == normalized_selected_team)
                             team_side = "Blue" if is_selected_team_blue else "Red"
                             left_team = normalized_selected_team if is_selected_team_blue else draft['blue_team']
                             right_team = draft['red_team'] if is_selected_team_blue else normalized_selected_team
 
-                            # Swap bans and picks based on the side
                             if is_selected_team_blue:
                                 left_bans = draft['blue_bans']
                                 right_bans = draft['red_bans']
@@ -1197,37 +1126,85 @@ def hll_league_page(selected_team):
                             vod_link = draft['vod_link']
                             vod = f'<a href="{vod_link}" target="_blank">VOD</a>' if vod_link != "N/A" else ""
 
-                            # Structure: 3 bans, 3 picks, 2 bans, 2 picks
                             table_data = [
-                                # First 3 bans
                                 (f"{get_champion_icon(left_bans[0])} {left_bans[0]}" if left_bans[0] != "N/A" else "", "Ban", f"{get_champion_icon(right_bans[0])} {right_bans[0]}" if right_bans[0] != "N/A" else "", vod),
                                 (f"{get_champion_icon(left_bans[1])} {left_bans[1]}" if left_bans[1] != "N/A" else "", "Ban", f"{get_champion_icon(right_bans[1])} {right_bans[1]}" if right_bans[1] != "N/A" else "", ""),
                                 (f"{get_champion_icon(left_bans[2])} {left_bans[2]}" if left_bans[2] != "N/A" else "", "Ban", f"{get_champion_icon(right_bans[2])} {right_bans[2]}" if right_bans[2] != "N/A" else "", result),
-                                # First 3 picks
                                 (f"{get_champion_icon(left_picks[0])} {left_picks[0]}" if left_picks[0] != "N/A" else "", "Pick", f"{get_champion_icon(right_picks[0])} {right_picks[0]}" if right_picks[0] != "N/A" else "", ""),
                                 (f"{get_champion_icon(left_picks[1])} {left_picks[1]}" if left_picks[1] != "N/A" else "", "Pick", f"{get_champion_icon(right_picks[1])} {right_picks[1]}" if right_picks[1] != "N/A" else "", ""),
                                 (f"{get_champion_icon(left_picks[2])} {left_picks[2]}" if left_picks[2] != "N/A" else "", "Pick", f"{get_champion_icon(right_picks[2])} {right_picks[2]}" if right_picks[2] != "N/A" else "", ""),
-                                # Last 2 bans
                                 (f"{get_champion_icon(left_bans[3])} {left_bans[3]}" if left_bans[3] != "N/A" else "", "Ban", f"{get_champion_icon(right_bans[3])} {right_bans[3]}" if right_bans[3] != "N/A" else "", ""),
                                 (f"{get_champion_icon(left_bans[4])} {left_bans[4]}" if left_bans[4] != "N/A" else "", "Ban", f"{get_champion_icon(right_bans[4])} {right_bans[4]}" if right_bans[4] != "N/A" else "", ""),
-                                # Last 2 picks
                                 (f"{get_champion_icon(left_picks[3])} {left_picks[3]}" if left_picks[3] != "N/A" else "", "Pick", f"{get_champion_icon(right_picks[3])} {right_picks[3]}" if right_picks[3] != "N/A" else "", ""),
                                 (f"{get_champion_icon(left_picks[4])} {left_picks[4]}" if left_picks[4] != "N/A" else "", "Pick", f"{get_champion_icon(right_picks[4])} {right_picks[4]}" if right_picks[4] != "N/A" else "", ""),
                             ]
 
                             df_draft = pd.DataFrame(table_data, columns=[left_team, "Action", right_team, "VOD"])
-                            html_draft = df_draft.to_html(escape=False, index=False, classes='styled-table drafts-table')
+
+                            def highlight_cells(row):
+                                styles = [''] * len(row)
+                                if row['Action'] == "Ban":
+                                    styles[0] = 'background-color: red'
+                                    styles[2] = 'background-color: red'
+                                if row['VOD'] == "Win":
+                                    styles[3] = 'background-color: green'
+                                elif row['VOD'] == "Loss":
+                                    styles[3] = 'background-color: red'
+                                return styles
+
+                            styled_df = df_draft.style.apply(highlight_cells, axis=1)
+                            html_draft = styled_df.to_html(escape=False, index=False, classes='styled-table drafts-table')
                             st.markdown(html_draft, unsafe_allow_html=True)
+
+    if st.session_state.show_notes:
+        st.subheader("Notes")
+        st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
+
+        if f'notes_data_{normalized_selected_team}' not in st.session_state:
+            st.session_state[f'notes_data_{normalized_selected_team}'] = load_notes_data(normalized_selected_team)
+
+        col_left, col_right = st.columns([3, 1])
+
+        with col_left:
+            st.subheader("Draft Templates")
+            table_cols = st.columns(3)
+            for i in range(6):
+                with table_cols[i % 3]:
+                    st.write(f"Draft Template {i + 1}")
+                    columns = ["Team 1", "Action", "Team 2"]
+                    df = pd.DataFrame(st.session_state[f'notes_data_{normalized_selected_team}']["tables"][i], columns=columns)
+                    edited_df = st.data_editor(
+                        df,
+                        num_rows="fixed",
+                        use_container_width=True,
+                        key=f"notes_table_{normalized_selected_team}_{i}",
+                        column_config={
+                            "Team 1": st.column_config.TextColumn("Team 1"),
+                            "Action": st.column_config.TextColumn("Action", disabled=True),
+                            "Team 2": st.column_config.TextColumn("Team 2"),
+                        }
+                    )
+                    st.session_state[f'notes_data_{normalized_selected_team}']["tables"][i] = edited_df.values.tolist()
+
+        with col_right:
+            st.subheader("Additional Notes")
+            notes_text = st.text_area(
+                "Write your notes here:",
+                value=st.session_state[f'notes_data_{normalized_selected_team}']["notes_text"],
+                height=400,
+                key=f"notes_text_area_{normalized_selected_team}"
+            )
+            st.session_state[f'notes_data_{normalized_selected_team}']["notes_text"] = notes_text
+
+        save_notes_data(st.session_state[f'notes_data_{normalized_selected_team}'], normalized_selected_team)
 
 def soloq_page():
     st.title("Gamespace 2025 SoloQ Statistics")
 
-    # Кнопка для возврата на страницу HLL League Stats
-    if st.button("Back to HLL League Stats"):
-        st.session_state.current_page = "HLL League Stats"
+    if st.button("Back to Hellenic Legends League Stats"):
+        st.session_state.current_page = "Hellenic Legends League Stats"
         st.rerun()
 
-    # Подключение к Google Sheets
     client = setup_google_sheets()
     if not client:
         return
@@ -1238,11 +1215,9 @@ def soloq_page():
         st.error(f"Ошибка подключения к Google Sheets: {str(e)}")
         return
 
-    # Инициализация данных в session_state
     if 'soloq_data' not in st.session_state:
         st.session_state.soloq_data = aggregate_soloq_data(spreadsheet, "Gamespace")
 
-    # Кнопка обновления данных
     if st.button("Update Soloq"):
         with st.spinner("Updating SoloQ data..."):
             for player, player_data in team_rosters["Gamespace"].items():
@@ -1252,7 +1227,6 @@ def soloq_page():
             st.session_state.soloq_data = aggregate_soloq_data(spreadsheet, "Gamespace")
         st.success("SoloQ data updated!")
 
-    # Секция статистики игроков
     st.subheader("SoloQ Player Statistics")
     st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
     soloq_data = st.session_state.soloq_data
@@ -1296,15 +1270,12 @@ def soloq_page():
             else:
                 st.write(f"No SoloQ data for {player}.")
 
-    # Секция визуализации
     st.subheader("SoloQ Games Over Time")
     st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
 
-    # Выбор игрока и периода
     selected_player = st.selectbox("Select Player for Visualization", players, key="viz_player")
     aggregation_type = st.selectbox("Aggregate by", ["Day", "Week", "Month"], key="agg_type")
 
-    # Получение данных для выбранного игрока
     wks = check_if_worksheets_exists(spreadsheet, selected_player)
     try:
         data = wks.get_all_values()
@@ -1312,12 +1283,10 @@ def soloq_page():
             st.write("No data available for visualization.")
             return
 
-        # Преобразование данных в DataFrame
         df = pd.DataFrame(data[1:], columns=["Дата матча", "Матч_айди", "Победа", "Чемпион", "Роль", "Киллы", "Смерти", "Ассисты"])
         df["Дата матча"] = pd.to_datetime(df["Дата матча"], errors='coerce')
-        df = df.dropna(subset=["Дата матча"])  # Удаляем строки без даты
+        df = df.dropna(subset=["Дата матча"])
 
-        # Агрегация данных
         if aggregation_type == "Day":
             df_agg = df.groupby(df["Дата матча"].dt.date).size().reset_index(name="Games")
             df_agg.columns = ["Дата", "Количество игр"]
@@ -1326,19 +1295,18 @@ def soloq_page():
         
         elif aggregation_type == "Week":
             df_agg = df.groupby(df["Дата матча"].dt.to_period("W")).size().reset_index(name="Games")
-            df_agg["Дата матча"] = df_agg["Дата матча"].apply(lambda x: x.start_time)  # Начало недели
+            df_agg["Дата матча"] = df_agg["Дата матча"].apply(lambda x: x.start_time)
             df_agg.columns = ["Дата", "Количество игр"]
             title = f"Games Played per Week by {selected_player}"
             st.bar_chart(df_agg.set_index("Дата")["Количество игр"])
         
         elif aggregation_type == "Month":
             df_agg = df.groupby(df["Дата матча"].dt.to_period("M")).size().reset_index(name="Games")
-            df_agg["Дата матча"] = df_agg["Дата матча"].apply(lambda x: x.start_time)  # Начало месяца
+            df_agg["Дата матча"] = df_agg["Дата матча"].apply(lambda x: x.start_time)
             df_agg.columns = ["Дата", "Количество игр"]
             title = f"Games Played per Month by {selected_player}"
             st.bar_chart(df_agg.set_index("Дата")["Количество игр"])
 
-        # Вывод заголовка
         if not df_agg.empty:
             st.write(f"**{title}**")
         else:
@@ -1351,7 +1319,6 @@ def soloq_page():
 with open('config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
-# Инициализация Authenticate
 authenticator = stauth.Authenticate(
     config['credentials'],
     config['cookie']['name'],
@@ -1359,26 +1326,21 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days']
 )
 
-# Проверяем, есть ли уже результат авторизации в сессии
 if 'authentication_status' not in st.session_state:
     st.session_state.authentication_status = None
     st.session_state.name = None
     st.session_state.username = None
 
-# Если пользователь ещё не авторизован, показываем форму логина
 if st.session_state.authentication_status is None:
     login_result = authenticator.login(key='Login')
     if login_result is not None:
         st.session_state.name, st.session_state.authentication_status, st.session_state.username = login_result
 
-# Извлекаем значения из st.session_state (они гарантированно существуют)
 name = st.session_state.name
 authentication_status = st.session_state.authentication_status
 username = st.session_state.username
 
-# Логика обработки авторизации
 if authentication_status:
-    # Пользователь авторизован
     with st.sidebar:
         authenticator.logout('Logout', 'sidebar')
         st.write(f'Welcome *Coach*')
