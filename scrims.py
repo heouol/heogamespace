@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 # Настройки
-GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Твой API-ключ
+GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
@@ -34,52 +34,128 @@ def check_if_worksheets_exists(spreadsheet, name):
         wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=10)
     return wks
 
-# Функция для получения данных из GRID API
-def get_scrims_data(series_id, game_number=1):
+# Функция для получения списка серий по патчу через GraphQL
+def get_series_by_patch(patch=None):
+    headers = {
+        "x-api-key": GRID_API_KEY,
+        "Content-Type": "application/json"
+    }
+    query = """
+    query ($filter: SeriesFilterInput, $first: Int, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+        allSeries(
+            filter: $filter
+            first: $first
+            orderBy: $orderBy
+            orderDirection: $orderDirection
+        ) {
+            totalCount
+            edges {
+                node {
+                    id
+                    startTimeScheduled
+                    tournament {
+                        name
+                    }
+                    patch
+                }
+            }
+        }
+    }
+    """
+    variables = {
+        "filter": {
+            "titleId": 3,  # LoL
+            "types": "SCRIM",  # Только скримы
+            "teams": TEAM_NAME
+        },
+        "first": 50,  # Максимум 50 серий за раз
+        "orderBy": "StartTimeScheduled",
+        "orderDirection": "DESC"
+    }
+    if patch:
+        variables["filter"]["patch"] = patch
+
+    try:
+        response = requests.post(
+            f"{GRID_BASE_URL}central-data/graphql",
+            headers=headers,
+            json={"query": query, "variables": variables}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            series = data.get("data", {}).get("allSeries", {}).get("edges", [])
+            return [s["node"] for s in series]
+        else:
+            st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
+            return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка подключения к GraphQL API: {str(e)}")
+        return []
+
+# Функция для загрузки данных серии
+def get_series_data(series_id, game_number=1):
     headers = {"x-api-key": GRID_API_KEY}
     url = f"https://api.grid.gg/file-download/end-state/riot/series/{series_id}/games/{game_number}/summary"
     
     try:
         response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            return response.json()  # Предполагаем, что возвращается JSON
+            return response.json()
         else:
-            st.error(f"Ошибка API: {response.status_code} - {response.text}")
+            st.error(f"Ошибка API для Series {series_id}, Game {game_number}: {response.status_code} - {response.text}")
             return None
     except requests.exceptions.RequestException as e:
         st.error(f"Ошибка подключения к GRID API: {str(e)}")
         return None
 
 # Функция для обновления данных в Google Sheets
-def update_scrims_data(worksheet, scrim_data):
-    if not scrim_data:
+def update_scrims_data(worksheet, series_list):
+    if not series_list:
         return False
     
     existing_data = worksheet.get_all_values()
     existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
-    match_id = str(scrim_data.get("matchId", scrim_data.get("id", "N/A")))
+    new_rows = []
     
-    if match_id not in existing_match_ids and match_id != "N/A":
-        teams = scrim_data.get("teams", [{}, {}])
-        is_blue_side = teams[0].get("name") == TEAM_NAME
-        opponent = teams[1].get("name", "Unknown") if is_blue_side else teams[0].get("name", "Unknown")
-        win = scrim_data.get("winner", {}).get("name") == TEAM_NAME
-        date = scrim_data.get("startTime", "N/A")
-        if date != "N/A" and "T" in date:
-            date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
-        
-        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A"]
-        
-        # Пики
-        participants = scrim_data.get("participants", [])
-        picks = [f"{p.get('role', 'N/A')}:{p.get('champion', 'N/A')}" for p in participants if p.get("team") == TEAM_NAME]
-        new_row.extend(picks)
-        
-        # Баны
-        bans = scrim_data.get("bans", {}).get(TEAM_NAME, [])
-        new_row.append(",".join(bans) if bans else "N/A")
-        
-        worksheet.append_row(new_row)
+    for series in series_list:
+        series_id = series.get("id")
+        # Пробуем загрузить данные для каждой игры (максимум 5 игр в серии)
+        for game_number in range(1, 6):
+            scrim_data = get_series_data(series_id, game_number)
+            if not scrim_data:  # Если игра не существует (например, 400 ошибка), прерываем цикл
+                break
+            
+            # Отладочный вывод
+            st.write(f"Данные для Series {series_id}, Game {game_number}:", scrim_data)
+            
+            match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id + f"-{game_number}")))
+            if match_id in existing_match_ids:
+                continue
+            
+            teams = scrim_data.get("teams", [{}, {}])
+            is_blue_side = teams[0].get("name") == TEAM_NAME
+            opponent = teams[1].get("name", "Unknown") if is_blue_side else teams[0].get("name", "Unknown")
+            win = scrim_data.get("winner", {}).get("name") == TEAM_NAME
+            date = scrim_data.get("startTime", series.get("startTimeScheduled", "N/A"))
+            if date != "N/A" and "T" in date:
+                date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+            
+            new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A"]
+            
+            # Пики
+            participants = scrim_data.get("participants", [])
+            picks = [f"{p.get('role', 'N/A')}:{p.get('champion', 'N/A')}" for p in participants if p.get("team") == TEAM_NAME]
+            new_row.extend(picks)
+            
+            # Баны
+            bans = scrim_data.get("bans", {}).get(TEAM_NAME, [])
+            new_row.append(",".join(bans) if bans else "N/A")
+            
+            new_rows.append(new_row)
+            existing_match_ids.add(match_id)
+    
+    if new_rows:
+        worksheet.append_rows(new_rows)
         return True
     return False
 
@@ -92,20 +168,20 @@ def aggregate_scrims_data(worksheet):
         "ADC": defaultdict(lambda: {"games": 0, "wins": 0}),
         "Support": defaultdict(lambda: {"games": 0, "wins": 0})
     }
-    bans_stats = defaultdict(int)
     blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
     red_side_stats = {"wins": 0, "losses": 0, "total": 0}
     match_history = []
 
     data = worksheet.get_all_values()
     if len(data) <= 1:
-        return role_stats, bans_stats, blue_side_stats, red_side_stats, match_history
+        return role_stats, blue_side_stats, red_side_stats, match_history
 
     for row in data[1:]:
         if len(row) < 6:
             continue
         
-        date, match_id, opponent, side, result, vod = row[:6]
+        date, match_id, opponent, side, result, vod, *rest = row
+        bans = row[-1] if len(row) > 6 else "N/A"
         win = result == "Win"
         is_blue_side = side == "Blue"
 
@@ -131,20 +207,16 @@ def aggregate_scrims_data(worksheet):
                     if win:
                         role_stats[role][champion]["wins"] += 1
 
-        bans = row[-1].split(",") if len(row) > 6 and row[-1] != "N/A" else []
-        for ban in bans:
-            if ban:
-                bans_stats[ban] += 1
-
         match_history.append({
             "Date": date,
             "Opponent": opponent,
             "Side": side,
             "Result": result,
-            "VOD": vod
+            "VOD": vod,
+            "Bans": bans
         })
 
-    return role_stats, bans_stats, blue_side_stats, red_side_stats, match_history
+    return role_stats, blue_side_stats, red_side_stats, match_history
 
 # Основная функция страницы
 def scrims_page():
@@ -171,23 +243,22 @@ def scrims_page():
     if not wks.get_all_values():
         wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Picks", "Bans"])
 
-    # Ввод Series ID
-    series_id = st.text_input("Enter Series ID (e.g., 2783620)", value="2783620")
-    game_number = st.number_input("Game Number", min_value=1, max_value=5, value=1, step=1)
+    # Фильтр по патчу
+    patch = st.text_input("Filter by Patch (e.g., 14.5)", value="")
     
     if st.button("Update Scrims Data"):
         with st.spinner("Updating scrims data from GRID API..."):
-            scrim_data = get_scrims_data(series_id, game_number)
-            if scrim_data:
-                if update_scrims_data(wks, scrim_data):
-                    st.success(f"Scrims data for Series {series_id}, Game {game_number} updated!")
+            series_list = get_series_by_patch(patch if patch else None)
+            if series_list:
+                if update_scrims_data(wks, series_list):
+                    st.success("Scrims data updated!")
                 else:
-                    st.warning("No new data added (possibly duplicate or error).")
+                    st.warning("No new data added (possibly duplicates or error).")
             else:
-                st.warning("No data returned from API.")
+                st.warning("No series found for the given patch.")
 
     # Агрегация и отображение
-    role_stats, bans_stats, blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
+    role_stats, blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
     total_matches = blue_side_stats["total"] + red_side_stats["total"]
     wins = blue_side_stats["wins"] + red_side_stats["wins"]
     losses = blue_side_stats["losses"] + red_side_stats["losses"]
@@ -220,14 +291,6 @@ def scrims_page():
                 st.markdown(df.to_html(index=False, escape=False), unsafe_allow_html=True)
             else:
                 st.write("No data available.")
-
-    st.subheader("Ban Statistics")
-    ban_stats = [{"Champion": champ, "Bans": count} for champ, count in bans_stats.items()]
-    if ban_stats:
-        df_bans = pd.DataFrame(ban_stats).sort_values("Bans", ascending=False)
-        st.markdown(df_bans.to_html(index=False, escape=False), unsafe_allow_html=True)
-    else:
-        st.write("No ban data available.")
 
     st.subheader("Match History")
     if match_history:
