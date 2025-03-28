@@ -34,14 +34,14 @@ def check_if_worksheets_exists(spreadsheet, name):
         wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=10)
     return wks
 
-# Функция для получения списка серий по патчу через GraphQL
-def get_series_by_patch(patch=None):
+# Функция для получения списка всех серий через GraphQL
+def get_all_series():
     headers = {
         "x-api-key": GRID_API_KEY,
         "Content-Type": "application/json"
     }
     query = """
-    query ($filter: SeriesFilterInput, $first: Int, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+    query ($filter: SeriesFilter, $first: Int, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
         allSeries(
             filter: $filter
             first: $first
@@ -56,7 +56,6 @@ def get_series_by_patch(patch=None):
                     tournament {
                         name
                     }
-                    patch
                 }
             }
         }
@@ -72,8 +71,6 @@ def get_series_by_patch(patch=None):
         "orderBy": "StartTimeScheduled",
         "orderDirection": "DESC"
     }
-    if patch:
-        variables["filter"]["patch"] = patch
 
     try:
         response = requests.post(
@@ -140,7 +137,11 @@ def update_scrims_data(worksheet, series_list):
             if date != "N/A" and "T" in date:
                 date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
             
-            new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A"]
+            # Извлекаем патч из данных (предполагаем, что он есть в scrim_data)
+            patch = scrim_data.get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
+            patch = ".".join(patch) if patch != "N/A" else "N/A"
+            
+            new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A", patch]
             
             # Пики
             participants = scrim_data.get("participants", [])
@@ -160,7 +161,7 @@ def update_scrims_data(worksheet, series_list):
     return False
 
 # Функция для агрегации данных из Google Sheets
-def aggregate_scrims_data(worksheet):
+def aggregate_scrims_data(worksheet, selected_patch=None):
     role_stats = {
         "Top": defaultdict(lambda: {"games": 0, "wins": 0}),
         "Jungle": defaultdict(lambda: {"games": 0, "wins": 0}),
@@ -171,17 +172,24 @@ def aggregate_scrims_data(worksheet):
     blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
     red_side_stats = {"wins": 0, "losses": 0, "total": 0}
     match_history = []
+    patches = set()
 
     data = worksheet.get_all_values()
     if len(data) <= 1:
-        return role_stats, blue_side_stats, red_side_stats, match_history
+        return role_stats, blue_side_stats, red_side_stats, match_history, patches
 
     for row in data[1:]:
-        if len(row) < 6:
+        if len(row) < 7:  # Учитываем новую колонку Patch
             continue
         
-        date, match_id, opponent, side, result, vod, *rest = row
-        bans = row[-1] if len(row) > 6 else "N/A"
+        date, match_id, opponent, side, result, vod, patch, *rest = row
+        bans = row[-1] if len(row) > 7 else "N/A"
+        
+        # Фильтрация по патчу
+        if selected_patch and patch != selected_patch:
+            continue
+        
+        patches.add(patch)
         win = result == "Win"
         is_blue_side = side == "Blue"
 
@@ -198,7 +206,7 @@ def aggregate_scrims_data(worksheet):
             else:
                 red_side_stats["losses"] += 1
 
-        picks = row[6:-1] if len(row) > 6 else []
+        picks = row[7:-1] if len(row) > 7 else []
         for pick in picks:
             if ":" in pick:
                 role, champion = pick.split(":", 1)
@@ -216,7 +224,7 @@ def aggregate_scrims_data(worksheet):
             "Bans": bans
         })
 
-    return role_stats, blue_side_stats, red_side_stats, match_history
+    return role_stats, blue_side_stats, red_side_stats, match_history, patches
 
 # Основная функция страницы
 def scrims_page():
@@ -241,24 +249,30 @@ def scrims_page():
 
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
-        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Picks", "Bans"])
+        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Patch", "Picks", "Bans"])
 
-    # Фильтр по патчу
-    patch = st.text_input("Filter by Patch (e.g., 14.5)", value="")
-    
-    if st.button("Update Scrims Data"):
-        with st.spinner("Updating scrims data from GRID API..."):
-            series_list = get_series_by_patch(patch if patch else None)
+    # Кнопка для загрузки всех серий
+    if st.button("Download All Scrims Data"):
+        with st.spinner("Downloading scrims data from GRID API..."):
+            series_list = get_all_series()
             if series_list:
                 if update_scrims_data(wks, series_list):
-                    st.success("Scrims data updated!")
+                    st.success("Scrims data downloaded and updated!")
                 else:
                     st.warning("No new data added (possibly duplicates or error).")
             else:
-                st.warning("No series found for the given patch.")
+                st.warning("No series found.")
+
+    # Получаем данные для фильтрации
+    _, _, _, _, patches = aggregate_scrims_data(wks)
+    patches = sorted([p for p in patches if p != "N/A"])
+    
+    # Выпадающий список для фильтрации по патчу
+    selected_patch = st.selectbox("Filter by Patch", ["All"] + patches, index=0)
+    selected_patch = None if selected_patch == "All" else selected_patch
 
     # Агрегация и отображение
-    role_stats, blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
+    role_stats, blue_side_stats, red_side_stats, match_history, _ = aggregate_scrims_data(wks, selected_patch)
     total_matches = blue_side_stats["total"] + red_side_stats["total"]
     wins = blue_side_stats["wins"] + red_side_stats["wins"]
     losses = blue_side_stats["losses"] + red_side_stats["losses"]
