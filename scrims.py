@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 # Настройки для API GRID (замени на свои реальные данные)
-GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Замени на реальный ключ API GRID
+GRID_API_KEY = "твой_api_ключ"  # Замени на реальный ключ API GRID
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
@@ -206,9 +206,12 @@ def scrims_page():
 
     # Общая статистика
     st.subheader("Overall Statistics")
-    st.markdown(f"**Total Matches:** {total_matches} | **Wins:** {wins} | **Losses:** {losses} | **Win Rate:** {wins/total_matches*100:.2f}%")
-    st.markdown(f"**Blue Side:** {blue_side_stats['wins']}/{blue_side_stats['total']} ({blue_side_stats['wins']/blue_side_stats['total']*100:.2f}% if blue_side_stats['total'] > 0 else 0)")
-    st.markdown(f"**Red Side:** {red_side_stats['wins']}/{red_side_stats['total']} ({red_side_stats['wins']/red_side_stats['total']*100:.2f}% if red_side_stats['total'] > 0 else 0)")
+    win_rate = f"{wins/total_matches*100:.2f}%" if total_matches > 0 else "0.00%"
+    st.markdown(f"**Total Matches:** {total_matches} | **Wins:** {wins} | **Losses:** {losses} | **Win Rate:** {win_rate}")
+    blue_win_rate = f"{blue_side_stats['wins']/blue_side_stats['total']*100:.2f}%" if blue_side_stats['total'] > 0 else "0.00%"
+    red_win_rate = f"{red_side_stats['wins']/red_side_stats['total']*100:.2f}%" if red_side_stats['total'] > 0 else "0.00%"
+    st.markdown(f"**Blue Side:** {blue_side_stats['wins']}/{blue_side_stats['total']} ({blue_win_rate})")
+    st.markdown(f"**Red Side:** {red_side_stats['wins']}/{red_side_stats['total']} ({red_win_rate})")
 
     # Статистика пиков по ролям
     st.subheader("Pick Statistics by Role")
