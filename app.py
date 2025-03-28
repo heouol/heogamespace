@@ -21,7 +21,7 @@ SUMMONER_NAME_BY_URL = "https://europe.api.riotgames.com/riot/account/v1/account
 MATCH_HISTORY_URL = "https://europe.api.riotgames.com/lol/match/v5/matches/by-puuid/{}/ids?start=0&count=100&api_key=RGAPI-2364bf09-8116-4d02-9dde-e2ed7cde4af8"
 MATCH_BASIC_URL = "https://europe.api.riotgames.com/lol/match/v5/matches/{}?api_key=RGAPI-2364bf09-8116-4d02-9dde-e2ed7cde4af8"
 
-# Список URL для разных этапов турнира
+# Список URL для разных этапов турнира (замени на свои ссылки)
 TOURNAMENT_URLS = {
     "Winter Split": {
         "match_history": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Split/Match_History",
@@ -33,7 +33,7 @@ TOURNAMENT_URLS = {
     }
 }
 
-# Team roster for UOL SE
+# Team roster for GMS (замени на реальных игроков Gamespace)
 team_rosters = {
     "Gamespace": {
         "Aytekn": {"game_name": ["AyteknnnN777"], "tag_line": ["777"], "role": "TOP"},
@@ -63,8 +63,16 @@ def normalize_team_name(team_name):
         return "unknown"
     
     team_exceptions = {
-        "dung dynasty": "Dung Dynasty",
-        "dung dynastylogo std": "Dung Dynasty",
+        "gamespace": "Gamespace",
+        "gms": "Gamespace",
+        "gamespacelogo std": "Gamespace",
+        "actions per minute": "Actions Per Minute",
+        "gamespace mce": "Gamespace MCE",
+        "gamespace mediterranean college": "Gamespace Mediterranean College",
+        "hell zerolag esports": "Hell Zerolag Esports",
+        "team insidious": "Team Insidious",
+        "team paradox": "Team Paradox",
+        "team phantasmo": "Team Phantasmo",
     }
 
     team_name_clean = team_name.lower().replace("logo std", "").strip()
@@ -219,6 +227,7 @@ def fetch_match_history_data():
                             team_data[team]['DuoPicks'][duo_key]['wins'] += 1
 
     return dict(team_data)
+
 # Fetch first bans data
 def fetch_first_bans_data():
     team_data = defaultdict(lambda: {
@@ -329,6 +338,7 @@ def fetch_first_bans_data():
         print("  RedFirstBans:", dict(team_data[team]['RedFirstBans']))
 
     return dict(team_data)
+
 # Fetch draft data
 def fetch_draft_data():
     team_drafts = defaultdict(list)
@@ -564,6 +574,7 @@ def fetch_draft_data():
             print(f"    Winner Side: {draft['winner_side']}")
 
     return dict(team_drafts)
+
 # Helper functions
 def get_champion(span_tag):
     if span_tag and 'title' in span_tag.attrs:
@@ -743,7 +754,15 @@ def aggregate_soloq_data(spreadsheet, team_name):
 
 # Main Streamlit function with button navigation
 def main():
-
+    # Очистка старых данных
+    if 'match_history_data' in st.session_state:
+        del st.session_state.match_history_data
+    if 'first_bans_data' in st.session_state:
+        del st.session_state.first_bans_data
+    if 'draft_data' in st.session_state:
+        del st.session_state.draft_data
+    if 'soloq_data' in st.session_state:
+        del st.session_state.soloq_data
 
     # Initialize session state for page navigation
     if 'current_page' not in st.session_state:
@@ -751,7 +770,7 @@ def main():
 
     st.sidebar.title("Navigation")
     
-    # Prime League Teams selection
+    # HLL Teams selection
     if 'match_history_data' not in st.session_state or 'first_bans_data' not in st.session_state or 'draft_data' not in st.session_state:
         with st.spinner("Loading data from Leaguepedia..."):
             st.session_state.match_history_data = fetch_match_history_data()
@@ -771,19 +790,19 @@ def main():
         st.warning("No teams found in the data.")
         return
 
-    selected_team = st.sidebar.selectbox("Select a HLL Team", teams, key="prime_team_select")
+    selected_team = st.sidebar.selectbox("Select a HLL Team", teams, key="hll_team_select")
 
-    # Button to switch to UOL SoloQ
+    # Button to switch to GMS SoloQ
     if st.session_state.current_page == "HLL League Stats":
-        if st.sidebar.button("Go to SoloQ"):
-            st.session_state.current_page = "SoloQ"
+        if st.sidebar.button("Go to GMS SoloQ"):
+            st.session_state.current_page = "GMS SoloQ"
             st.rerun()
 
     # Добавляем логотип и текст внизу бокового меню
     st.sidebar.markdown("<hr style='border: 1px solid #333; margin: 20px 0;'>", unsafe_allow_html=True)
     
-    # Логотип Unicorns of Love
-    st.sidebar.image("logo.webp", width=100, use_container_width=True)  # Заменили use_column_width на use_container_width
+    # Логотип Gamespace
+    st.sidebar.image("gms_logo.png", width=100, use_container_width=True)
     
     # Текст "by heovech"
     st.sidebar.markdown(
@@ -797,43 +816,12 @@ def main():
 
     # Render the appropriate page
     if st.session_state.current_page == "HLL League Stats":
-        prime_league_page(selected_team)
-    elif st.session_state.current_page == "UOL SoloQ":
+        hll_league_page(selected_team)
+    elif st.session_state.current_page == "GMS SoloQ":
         soloq_page()
 
-def save_notes_data(data, team_name, filename_prefix="notes_data"):
-    """Сохраняет данные в JSON-файл, уникальный для каждой команды."""
-    filename = f"{filename_prefix}_{team_name}.json"
-    with open(filename, "w") as f:
-        json.dump(data, f)
-
-def load_notes_data(team_name, filename_prefix="notes_data"):
-    """Загружает данные из JSON-файла для конкретной команды. Если файла нет, возвращает начальные данные."""
-    filename = f"{filename_prefix}_{team_name}.json"
-    default_data = {
-        "tables": [
-            [
-                ["", "Ban", ""],
-                ["", "Ban", ""],
-                ["", "Ban", ""],
-                ["", "Pick", ""],
-                ["", "Pick", ""],
-                ["", "Pick", ""],
-                ["", "Ban", ""],
-                ["", "Ban", ""],
-                ["", "Pick", ""],
-                ["", "Pick", ""]
-            ] for _ in range(6)  # 6 таблиц с пустыми данными
-        ],
-        "notes_text": ""  # Пустое поле для заметок
-    }
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            return json.load(f)
-    return default_data
-
-def prime_league_page(selected_team):
-    st.title("HLL League Stats")
+def hll_league_page(selected_team):
+    st.title("HLL League 2025 Winter - Pick & Ban Statistics")
 
     normalized_selected_team = normalize_team_name(selected_team)
 
@@ -842,10 +830,7 @@ def prime_league_page(selected_team):
         with st.spinner("Updating data..."):
             st.session_state.match_history_data = fetch_match_history_data()
             st.session_state.first_bans_data = fetch_first_bans_data()
-            # Обновляем draft_data, чтобы данные были уникальны для каждой команды
-            if 'draft_data' not in st.session_state:
-                st.session_state.draft_data = {}
-            st.session_state.draft_data[normalized_selected_team] = fetch_draft_data()
+            st.session_state.draft_data = fetch_draft_data()
         st.success("Data updated!")
 
     # Initialize session state for button toggles if not exists
@@ -857,11 +842,9 @@ def prime_league_page(selected_team):
         st.session_state.show_duo_picks = False
     if 'show_drafts' not in st.session_state:
         st.session_state.show_drafts = False
-    if 'show_notes' not in st.session_state:
-        st.session_state.show_notes = False
 
     # Button controls for main sections
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("Picks", key="picks_btn"):
             st.session_state.show_picks = not st.session_state.show_picks
@@ -874,9 +857,6 @@ def prime_league_page(selected_team):
     with col4:
         if st.button("Drafts", key="drafts_btn"):
             st.session_state.show_drafts = not st.session_state.show_drafts
-    with col5:
-        if st.button("Notes", key="notes_btn"):
-            st.session_state.show_notes = not st.session_state.show_notes
 
     # Display blocks based on button states
     team_info = st.session_state.match_history_data.get(normalized_selected_team, {})
@@ -1151,7 +1131,6 @@ def prime_league_page(selected_team):
     if st.session_state.show_drafts:
         st.subheader("Drafts")
         st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
-        # Используем данные draft_data для текущей команды
         draft_data = st.session_state.draft_data.get(normalized_selected_team, [])
         if draft_data:
             # Group drafts by match_key (team pair)
@@ -1237,82 +1216,13 @@ def prime_league_page(selected_team):
                             ]
 
                             df_draft = pd.DataFrame(table_data, columns=[left_team, "Action", right_team, "VOD"])
-
-                            # Define a function to apply styles to the DataFrame
-                            def highlight_cells(row):
-                                styles = [''] * len(row)
-                                # Highlight ban rows (left_team and right_team columns)
-                                if row['Action'] == "Ban":
-                                    styles[0] = 'background-color: red'  # left_team column
-                                    styles[2] = 'background-color: red'  # right_team column
-                                # Highlight the result cell in the VOD column
-                                if row['VOD'] == "Win":
-                                    styles[3] = 'background-color: green'  # VOD column for Win
-                                elif row['VOD'] == "Loss":
-                                    styles[3] = 'background-color: red'  # VOD column for Loss
-                                return styles
-
-                            # Apply the styles to the DataFrame
-                            styled_df = df_draft.style.apply(highlight_cells, axis=1)
-
-                            # Convert to HTML with the styled-table and drafts-table classes
-                            html_draft = styled_df.to_html(escape=False, index=False, classes='styled-table drafts-table')
+                            html_draft = df_draft.to_html(escape=False, index=False, classes='styled-table drafts-table')
                             st.markdown(html_draft, unsafe_allow_html=True)
 
-    if st.session_state.show_notes:
-        st.subheader("Notes")
-        st.markdown("<hr style='border: 2px solid #333; margin: 10px 0;'>", unsafe_allow_html=True)
-
-        # Load saved data for the current team
-        if f'notes_data_{normalized_selected_team}' not in st.session_state:
-            st.session_state[f'notes_data_{normalized_selected_team}'] = load_notes_data(normalized_selected_team)
-
-        # Split the layout into two columns: tables on the left, notes on the right
-        col_left, col_right = st.columns([3, 1])
-
-        with col_left:
-            st.subheader("Draft Templates")
-            table_cols = st.columns(3)  # 3 tables per row
-            for i in range(6):
-                with table_cols[i % 3]:
-                    st.write(f"Draft Template {i + 1}")
-                    columns = ["Team 1", "Action", "Team 2"]
-                    df = pd.DataFrame(st.session_state[f'notes_data_{normalized_selected_team}']["tables"][i], columns=columns)
-
-                    # Make the DataFrame editable
-                    edited_df = st.data_editor(
-                        df,
-                        num_rows="fixed",
-                        use_container_width=True,
-                        key=f"notes_table_{normalized_selected_team}_{i}",
-                        column_config={
-                            "Team 1": st.column_config.TextColumn("Team 1"),
-                            "Action": st.column_config.TextColumn("Action", disabled=True),  # Action column is not editable
-                            "Team 2": st.column_config.TextColumn("Team 2"),
-                        }
-                    )
-
-                    # Update the data in session state when the table is edited
-                    st.session_state[f'notes_data_{normalized_selected_team}']["tables"][i] = edited_df.values.tolist()
-
-        with col_right:
-            st.subheader("Additional Notes")
-            notes_text = st.text_area(
-                "Write your notes here:",
-                value=st.session_state[f'notes_data_{normalized_selected_team}']["notes_text"],
-                height=400,
-                key=f"notes_text_area_{normalized_selected_team}"
-            )
-
-            # Update the notes text in session state
-            st.session_state[f'notes_data_{normalized_selected_team}']["notes_text"] = notes_text
-
-        # Save the updated data to the file for the current team
-        save_notes_data(st.session_state[f'notes_data_{normalized_selected_team}'], normalized_selected_team)
 def soloq_page():
     st.title("Gamespace 2025 SoloQ Statistics")
 
-    # Кнопка для возврата на страницу Prime League Stats
+    # Кнопка для возврата на страницу HLL League Stats
     if st.button("Back to HLL League Stats"):
         st.session_state.current_page = "HLL League Stats"
         st.rerun()
@@ -1437,8 +1347,7 @@ def soloq_page():
     except gspread.exceptions.APIError as e:
         st.error(f"Ошибка API Google Sheets при загрузке данных: {str(e)}")
 
-
-# Аутентификация (вставляем здесь)
+# Аутентификация
 with open('config.yaml') as file:
     config = yaml.load(file, Loader=SafeLoader)
 
