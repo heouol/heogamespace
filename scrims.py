@@ -30,7 +30,7 @@ def check_if_worksheets_exists(spreadsheet, name):
     try:
         wks = spreadsheet.worksheet(name)
     except gspread.exceptions.WorksheetNotFound:
-        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=10)
+        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=24)  # 24 столбца
     return wks
 
 # Функция для получения списка всех серий через GraphQL с пагинацией
@@ -97,7 +97,6 @@ def get_all_series():
             )
             if response.status_code == 200:
                 data = response.json()
-                st.write("GraphQL Response:", data)  # Отладочный вывод
                 all_series_data = data.get("data", {}).get("allSeries", {})
                 series = all_series_data.get("edges", [])
                 all_series.extend([s["node"] for s in series])
@@ -137,7 +136,7 @@ def update_scrims_data(worksheet, series_list):
         return False
     
     existing_data = worksheet.get_all_values()
-    existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
+    existing_match_ids = set(row[2] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID в столбце 3
     new_rows = []
     
     for series in series_list:
@@ -145,12 +144,6 @@ def update_scrims_data(worksheet, series_list):
         scrim_data = download_series_data(series_id)
         if not scrim_data:
             continue
-        
-        # Отладочный вывод
-        st.write(f"Данные для Series {series_id}:", scrim_data)
-        # Проверяем тип серии
-        series_type = scrim_data.get("type", scrim_data.get("seriesType", "Unknown"))
-        st.write(f"Тип серии для Series {series_id}: {series_type}")
         
         # Проверяем, участвует ли Gamespace MC
         teams = scrim_data.get("teams", [{}, {}])
@@ -163,10 +156,7 @@ def update_scrims_data(worksheet, series_list):
         if match_id in existing_match_ids:
             continue
         
-        is_blue_side = team_0_name == TEAM_NAME
-        opponent = team_1_name if is_blue_side else team_0_name
-        win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
-        
+        # Дата
         date = scrim_data.get("startTime", series.get("startTimeScheduled", scrim_data.get("updatedAt", "N/A")))
         if date != "N/A" and "T" in date:
             try:
@@ -177,7 +167,44 @@ def update_scrims_data(worksheet, series_list):
                 except ValueError:
                     date = "N/A"
         
-        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss"]
+        # Патч
+        patch = scrim_data.get("patch", scrim_data.get("gameVersion", "N/A"))
+        
+        # Команды
+        blue_team = team_0_name  # Команда 0 — синяя сторона
+        red_team = team_1_name   # Команда 1 — красная сторона
+        
+        # Баны
+        draft = scrim_data.get("draft", {})
+        blue_bans = draft.get("bans", {}).get("team0", ["N/A"] * 5)[:5]  # Баны синей стороны
+        red_bans = draft.get("bans", {}).get("team1", ["N/A"] * 5)[:5]   # Баны красной стороны
+        
+        # Пики
+        participants = scrim_data.get("participants", [])
+        blue_picks = ["N/A"] * 5
+        red_picks = ["N/A"] * 5
+        for i, participant in enumerate(participants[:10]):  # Первые 10 участников (5 синих, 5 красных)
+            champion = participant.get("champion", "N/A")
+            if i < 5:  # Синяя сторона
+                blue_picks[i] = champion
+            else:  # Красная сторона
+                red_picks[i - 5] = champion
+        
+        # Длительность
+        duration = scrim_data.get("duration", scrim_data.get("gameDuration", "N/A"))
+        if isinstance(duration, (int, float)):
+            duration = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Переводим секунды в формат MM:SS
+        
+        # Победа или поражение
+        win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
+        result = "Win" if win else "Loss"
+        
+        # Формируем строку
+        new_row = [
+            date, patch, match_id, blue_team, red_team,
+            *blue_bans, *red_bans, *blue_picks, *red_picks,
+            duration, result
+        ]
         
         new_rows.append(new_row)
         existing_match_ids.add(match_id)
@@ -198,12 +225,12 @@ def aggregate_scrims_data(worksheet):
         return blue_side_stats, red_side_stats, match_history
 
     for row in data[1:]:
-        if len(row) < 5:  # Минимально ожидаем Date, Match ID, Opponent, Side, Result
+        if len(row) < 24:  # Ожидаем 24 столбца
             continue
         
-        date, match_id, opponent, side, result = row[:5]
+        date, patch, match_id, blue_team, red_team, *_, duration, result = row
         win = result == "Win"
-        is_blue_side = side == "Blue"
+        is_blue_side = blue_team == TEAM_NAME
 
         if is_blue_side:
             blue_side_stats["total"] += 1
@@ -220,8 +247,11 @@ def aggregate_scrims_data(worksheet):
 
         match_history.append({
             "Date": date,
-            "Opponent": opponent,
-            "Side": side,
+            "Patch": patch,
+            "Match ID": match_id,
+            "Blue Team": blue_team,
+            "Red Team": red_team,
+            "Duration": duration,
             "Result": result
         })
 
@@ -250,7 +280,14 @@ def scrims_page():
 
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
-        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result"])
+        wks.append_row([
+            "Date", "Patch", "Match ID", "Blue Team", "Red Team",
+            "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5",
+            "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5",
+            "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5",
+            "Red Pick 1", "Red Pick 2", "Red Pick 3", "Red Pick 4", "Red Pick 5",
+            "Duration", "Result"
+        ])
 
     # Кнопка для загрузки всех серий
     if st.button("Download All Scrims Data"):
