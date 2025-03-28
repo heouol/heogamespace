@@ -132,26 +132,35 @@ def update_scrims_data(worksheet, series_list):
             continue
         
         teams = scrim_data.get("teams", [{}, {}])
-        is_blue_side = teams[0].get("name") == TEAM_NAME
-        opponent = teams[1].get("name", "Unknown") if is_blue_side else teams[0].get("name", "Unknown")
-        win = teams[0].get("won", False) if teams[0].get("name") == TEAM_NAME else teams[1].get("won", False)
+        team_0_name = teams[0].get("name", "Unknown")
+        team_1_name = teams[1].get("name", "Unknown")
+        is_blue_side = team_0_name == TEAM_NAME
+        opponent = team_1_name if is_blue_side else team_0_name
+        win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
+        
         date = scrim_data.get("startTime", series.get("startTimeScheduled", scrim_data.get("updatedAt", "N/A")))
         if date != "N/A" and "T" in date:
             try:
                 date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%fZ").strftime("%Y-%m-%d %H:%M:%S")
             except ValueError:
-                date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    date = "N/A"
         
         # Извлекаем патч из games[0].stats
         games = scrim_data.get("games", [{}])
         game = games[0] if games else {}
-        patch = game.get("stats", {}).get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
+        stats = game.get("stats", {})
+        st.write(f"Stats для Series {series_id}:", stats)  # Отладочный вывод
+        patch = stats.get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
         patch = ".".join(patch) if patch != "N/A" else "N/A"
         
         new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A", patch]
         
         # Пики и баны из games[0].draftActions
         draft_actions = game.get("draftActions", [])
+        st.write(f"Draft Actions для Series {series_id}:", draft_actions)  # Отладочный вывод
         picks = []
         bans = []
         pick_order = 0  # Для определения ролей
@@ -163,7 +172,9 @@ def update_scrims_data(worksheet, series_list):
             team_id = action.get("drafter", {}).get("id")
             if not champion or not team_id:
                 continue
-            if team_id == "19770":  # Gamespace MC
+            # Проверяем, является ли команда Gamespace MC
+            team_name = team_0_name if team_id == teams[0].get("id") else team_1_name
+            if team_name == TEAM_NAME:
                 if action_type == "pick":
                     role = role_mapping.get(pick_order, "N/A")
                     picks.append(f"{role}:{champion}")
