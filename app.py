@@ -802,7 +802,7 @@ def main():
     st.sidebar.markdown("<hr style='border: 1px solid #333; margin: 20px 0;'>", unsafe_allow_html=True)
     
     # Логотип Gamespace
-    st.sidebar.image("gms_logo.png", width=100, use_container_width=True)
+    st.sidebar.image("logo.webp", width=100, use_container_width=True)
     
     # Текст "by heovech"
     st.sidebar.markdown(
