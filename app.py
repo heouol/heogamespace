@@ -36,11 +36,11 @@ TOURNAMENT_URLS = {
 # Team roster for Gamespace (GMS)
 team_rosters = {
     "Gamespace": {
-        "Fornoreason": {"game_name": ["床前明月光疑是地上霜举头望明月低", "FornoReason"], "tag_line": ["CN1", "Gap"], "role": "TOP"},
-        "White": {"game_name": ["Alsabr"], "tag_line": ["314"], "role": "JUNGLE"},
-        "Simpli": {"game_name": ["Simpli"], "tag_line": ["Jasmi"], "role": "MIDDLE"},
-        "DenVoksne": {"game_name": ["Ignacarious", "Mαster Oogwαy"], "tag_line": ["5232", "EUW"], "role": "BOTTOM"},
-        "seaz": {"game_name": ["고군분투일취월장", "ASV13 08"], "tag_line": ["KR6", "1130"], "role": "UTILITY"},
+        "Aytekn": {"game_name": ["AyteknnnN777"], "tag_line": ["777"], "role": "TOP"},
+        "Pallet": {"game_name": ["KC Bo", "yiqunsb"], "tag_line": ["2106", "KR21"], "role": "JUNGLE"},
+        "Tsiperakos": {"game_name": ["Tsiperakos", "Tsiper"], "tag_line": ["MID", "tsprk"], "role": "MIDDLE"},
+        "Kenal": {"game_name": ["Kenal", "Kaneki Kenal"], "tag_line": ["EUW", "EUW0"], "role": "BOTTOM"},
+        "Centu": {"game_name": ["ΣΑΝ ΚΡΟΥΑΣΑΝ", "Aim First"], "tag_line": ["Ker10", "001"], "role": "UTILITY"},
     }
 }
 
