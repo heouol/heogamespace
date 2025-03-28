@@ -6,13 +6,14 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import os
 from datetime import datetime, timedelta
+import time  # Для добавления задержек
 
 # Настройки
 GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
-SHEET_NAME = "Scrims_GMS"
+SHEET_NAME = "Scrims_GMS_Detailed"  # Новая таблица, чтобы не конфликтовать со старой
 
 # Настройка Google Sheets
 def setup_google_sheets():
@@ -114,21 +115,30 @@ def get_all_series():
 
     return all_series
 
-# Функция для загрузки данных серии (GRID-формат)
-def download_series_data(series_id):
+# Функция для загрузки данных серии (GRID-формат) с обработкой 429
+def download_series_data(series_id, max_retries=3, initial_delay=5):
     headers = {"x-api-key": GRID_API_KEY}
     url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"
     
-    try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            st.error(f"Ошибка API для Series {series_id}: {response.status_code} - {response.text}")
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 429:  # Too Many Requests
+                delay = initial_delay * (2 ** attempt)  # Экспоненциальная задержка
+                st.warning(f"Ошибка 429 для Series {series_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
+                time.sleep(delay)
+                continue
+            else:
+                st.error(f"Ошибка API для Series {series_id}: {response.status_code} - {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            st.error(f"Ошибка подключения к GRID API для Series {series_id}: {str(e)}")
             return None
-    except requests.exceptions.RequestException as e:
-        st.error(f"Ошибка подключения к GRID API: {str(e)}")
-        return None
+    
+    st.error(f"Не удалось загрузить данные для Series {series_id} после {max_retries} попыток.")
+    return None
 
 # Функция для обновления данных в Google Sheets
 def update_scrims_data(worksheet, series_list):
@@ -139,14 +149,22 @@ def update_scrims_data(worksheet, series_list):
     existing_match_ids = set(row[2] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID в столбце 3
     new_rows = []
     
-    for series in series_list:
+    for i, series in enumerate(series_list):
         series_id = series.get("id")
+        # Добавляем задержку между запросами (0.5 секунды)
+        if i > 0:
+            time.sleep(0.5)
+        
         scrim_data = download_series_data(series_id)
         if not scrim_data:
             continue
         
         # Проверяем, участвует ли Gamespace MC
-        teams = scrim_data.get("teams", [{}, {}])
+        teams = scrim_data.get("teams", None)
+        if not teams or len(teams) < 2:
+            st.warning(f"Не удалось найти команды для Series {series_id}. Пропускаем. Данные: {scrim_data}")
+            continue
+        
         team_0_name = teams[0].get("name", "Unknown")
         team_1_name = teams[1].get("name", "Unknown")
         if TEAM_NAME not in [team_0_name, team_1_name]:
