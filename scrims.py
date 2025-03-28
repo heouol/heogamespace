@@ -40,7 +40,7 @@ def get_all_series():
         "Content-Type": "application/json"
     }
     query = """
-    query ($filter: SeriesFilter, $first: Int, $after: String, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+    query ($filter: SeriesFilter, $first: Int, $after: Cursor, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
         allSeries(
             filter: $filter
             first: $first
@@ -71,7 +71,7 @@ def get_all_series():
     variables = {
         "filter": {
             "titleId": 3,  # LoL
-            "types": "SCRIM",  # Возвращаем фильтр для скримов
+            "types": "SCRIM",  # Фильтр для скримов
             "startTimeScheduled": {
                 "gte": six_months_ago  # Ищем матчи за последние 6 месяцев
             }
