@@ -1,0 +1,10 @@
+credentials:
+  usernames:
+    coach:
+      email: coach@example.com
+      name: Сoach
+      password: $2b$12$N9xBkjUXn3iw.ukvJdxVs.q1hxx5uZKCVKlGDmQQ3W6BIMF0csS2S
+cookie:
+  name: uol_cookie
+  key: some_random_secret_key
+  expiry_days: 30
