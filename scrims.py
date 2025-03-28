@@ -57,7 +57,8 @@ def get_all_series():
                         name
                     }
                     teams {
-                        team {
+                        id
+                        participant {
                             name
                         }
                     }
@@ -90,7 +91,7 @@ def get_all_series():
             filtered_series = []
             for s in series:
                 teams = s["node"].get("teams", [])
-                team_names = [team.get("team", {}).get("name", "Unknown") for team in teams]
+                team_names = [team.get("participant", {}).get("name", "Unknown") for team in teams]
                 st.write(f"Series {s['node']['id']} Teams:", team_names)  # Отладочный вывод
                 if TEAM_NAME in team_names:
                     filtered_series.append(s["node"])
