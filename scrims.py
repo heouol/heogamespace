@@ -205,7 +205,7 @@ def scrims_page():
         st.session_state.current_page = "Hellenic Legends League Stats"
         st.rerun()
 
-    client =植物_google_sheets()
+    client = setup_google_sheets()  # Исправлено: заменили 植物_google_sheets() на setup_google_sheets()
     if not client:
         return
 
