@@ -12,6 +12,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import json
 import os
+from scrims import scrims_page  # Импорт функции scrims_page из файла scrims.py
 
 # Set page config at the start (must be the first Streamlit command)
 st.set_page_config(layout="wide", page_title="HLL Analytics")
@@ -703,9 +704,13 @@ def main():
 
     selected_team = st.sidebar.selectbox("Select a Hellenic Legends League Team", teams, key="hll_team_select")
 
+    # Добавляем кнопки навигации
     if st.session_state.current_page == "Hellenic Legends League Stats":
         if st.sidebar.button("Go to GMS SoloQ"):
             st.session_state.current_page = "GMS SoloQ"
+            st.rerun()
+        if st.sidebar.button("Go to Scrims"):
+            st.session_state.current_page = "Scrims"
             st.rerun()
 
     st.sidebar.markdown("<hr style='border: 1px solid #333; margin: 20px 0;'>", unsafe_allow_html=True)
@@ -719,10 +724,13 @@ def main():
         unsafe_allow_html=True
     )
 
+    # Выбор страницы
     if st.session_state.current_page == "Hellenic Legends League Stats":
         hll_page(selected_team)
     elif st.session_state.current_page == "GMS SoloQ":
         soloq_page()
+    elif st.session_state.current_page == "Scrims":
+        scrims_page()  # Вызов функции из scrims.py
 
 def save_notes_data(data, team_name, filename_prefix="notes_data"):
     filename = f"{filename_prefix}_{team_name}.json"
