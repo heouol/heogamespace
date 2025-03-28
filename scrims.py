@@ -8,12 +8,12 @@ import json
 import os
 from datetime import datetime
 
-# Настройки для API GRID (замени на свои реальные данные)
-GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Замени на реальный ключ API GRID
+# Настройки
+GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Твой API-ключ
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
-SHEET_NAME = "Scrims_GMS"  # Название Google Sheets для скримов
+SHEET_NAME = "Scrims_GMS"
 
 # Настройка Google Sheets
 def setup_google_sheets():
@@ -35,62 +35,53 @@ def check_if_worksheets_exists(spreadsheet, name):
     return wks
 
 # Функция для получения данных из GRID API
-def get_scrims_data(patch=None):
-    headers = {"Authorization": f"Bearer {GRID_API_KEY}"}
-    params = {"tournament": TOURNAMENT_NAME, "team": TEAM_NAME}
-    if patch:
-        params["patch"] = patch
+def get_scrims_data(series_id, game_number=1):
+    headers = {"x-api-key": GRID_API_KEY}
+    url = f"https://api.grid.gg/file-download/end-state/riot/series/{series_id}/games/{game_number}/summary"
     
     try:
-        response = requests.get(f"{GRID_BASE_URL}/matches", headers=headers, params=params)
+        response = requests.get(url, headers=headers)
         if response.status_code == 200:
-            return response.json()
+            return response.json()  # Предполагаем, что возвращается JSON
         else:
             st.error(f"Ошибка API: {response.status_code} - {response.text}")
-            return []
+            return None
     except requests.exceptions.RequestException as e:
         st.error(f"Ошибка подключения к GRID API: {str(e)}")
-        return []
+        return None
 
 # Функция для обновления данных в Google Sheets
-def update_scrims_data(worksheet, scrims_data):
+def update_scrims_data(worksheet, scrim_data):
+    if not scrim_data:
+        return False
+    
     existing_data = worksheet.get_all_values()
     existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
+    match_id = str(scrim_data.get("matchId", scrim_data.get("id", "N/A")))
     
-    new_rows = []
-    for match in scrims_data:
-        match_id = match.get("id", "N/A")
-        if match_id not in existing_match_ids and match_id != "N/A":
-            is_blue_side = match.get("team1", {}).get("name") == TEAM_NAME
-            opponent = match.get("team2", {}).get("name") if is_blue_side else match.get("team1", {}).get("name")
-            win = match.get("winner") == TEAM_NAME
-            date = match.get("date", "N/A")
-            if date != "N/A":
-                date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S") if "T" in date else date
-            
-            new_rows.append([
-                date,
-                match_id,
-                opponent,
-                "Blue" if is_blue_side else "Red",
-                "Win" if win else "Loss",
-                match.get("vod_url", "N/A")
-            ])
-            
-            # Добавляем пики и баны
-            participants = match.get("participants", [])
-            for player in participants:
-                if player.get("team") == TEAM_NAME:
-                    role = player.get("role", "N/A")
-                    champion = player.get("champion", "N/A")
-                    if role != "N/A" and champion != "N/A":
-                        new_rows[-1].append(f"{role}:{champion}")
-            bans = match.get("bans", {}).get(TEAM_NAME, [])
-            new_rows[-1].append(",".join(bans) if bans else "N/A")
-
-    if new_rows:
-        worksheet.append_rows(new_rows)
-    return new_rows
+    if match_id not in existing_match_ids and match_id != "N/A":
+        teams = scrim_data.get("teams", [{}, {}])
+        is_blue_side = teams[0].get("name") == TEAM_NAME
+        opponent = teams[1].get("name", "Unknown") if is_blue_side else teams[0].get("name", "Unknown")
+        win = scrim_data.get("winner", {}).get("name") == TEAM_NAME
+        date = scrim_data.get("startTime", "N/A")
+        if date != "N/A" and "T" in date:
+            date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+        
+        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A"]
+        
+        # Пики
+        participants = scrim_data.get("participants", [])
+        picks = [f"{p.get('role', 'N/A')}:{p.get('champion', 'N/A')}" for p in participants if p.get("team") == TEAM_NAME]
+        new_row.extend(picks)
+        
+        # Баны
+        bans = scrim_data.get("bans", {}).get(TEAM_NAME, [])
+        new_row.append(",".join(bans) if bans else "N/A")
+        
+        worksheet.append_row(new_row)
+        return True
+    return False
 
 # Функция для агрегации данных из Google Sheets
 def aggregate_scrims_data(worksheet):
@@ -118,7 +109,6 @@ def aggregate_scrims_data(worksheet):
         win = result == "Win"
         is_blue_side = side == "Blue"
 
-        # Статистика по сторонам
         if is_blue_side:
             blue_side_stats["total"] += 1
             if win:
@@ -132,7 +122,6 @@ def aggregate_scrims_data(worksheet):
             else:
                 red_side_stats["losses"] += 1
 
-        # Статистика пиков
         picks = row[6:-1] if len(row) > 6 else []
         for pick in picks:
             if ":" in pick:
@@ -142,13 +131,11 @@ def aggregate_scrims_data(worksheet):
                     if win:
                         role_stats[role][champion]["wins"] += 1
 
-        # Статистика банов
         bans = row[-1].split(",") if len(row) > 6 and row[-1] != "N/A" else []
         for ban in bans:
             if ban:
                 bans_stats[ban] += 1
 
-        # История матчей
         match_history.append({
             "Date": date,
             "Opponent": opponent,
@@ -159,16 +146,14 @@ def aggregate_scrims_data(worksheet):
 
     return role_stats, bans_stats, blue_side_stats, red_side_stats, match_history
 
-# Основная функция страницы Scrims
+# Основная функция страницы
 def scrims_page():
     st.title("Scrims - Gamespace MC")
 
-    # Кнопка возврата на главную страницу
     if st.button("Back to Hellenic Legends League Stats"):
         st.session_state.current_page = "Hellenic Legends League Stats"
         st.rerun()
 
-    # Подключение к Google Sheets
     client = setup_google_sheets()
     if not client:
         return
@@ -177,34 +162,36 @@ def scrims_page():
         spreadsheet = client.open(SHEET_NAME)
     except gspread.exceptions.SpreadsheetNotFound:
         spreadsheet = client.create(SHEET_NAME)
-        spreadsheet.share("", perm_type="anyone", role="writer")  # Открываем доступ, если нужно
+        spreadsheet.share("", perm_type="anyone", role="writer")
     except gspread.exceptions.APIError as e:
         st.error(f"Ошибка подключения к Google Sheets: {str(e)}")
         return
 
-    # Создаем или получаем лист "Scrims"
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
         wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Picks", "Bans"])
 
-    # Фильтр по патчу и обновление данных
-    selected_patch = st.text_input("Filter by Patch (e.g., 14.5)", value="")
+    # Ввод Series ID
+    series_id = st.text_input("Enter Series ID (e.g., 2783620)", value="2783620")
+    game_number = st.number_input("Game Number", min_value=1, max_value=5, value=1, step=1)
+    
     if st.button("Update Scrims Data"):
         with st.spinner("Updating scrims data from GRID API..."):
-            scrims_data = get_scrims_data(selected_patch if selected_patch else None)
-            if scrims_data:
-                update_scrims_data(wks, scrims_data)
-                st.success("Scrims data updated!")
+            scrim_data = get_scrims_data(series_id, game_number)
+            if scrim_data:
+                if update_scrims_data(wks, scrim_data):
+                    st.success(f"Scrims data for Series {series_id}, Game {game_number} updated!")
+                else:
+                    st.warning("No new data added (possibly duplicate or error).")
             else:
-                st.warning("No new data to update.")
+                st.warning("No data returned from API.")
 
-    # Агрегация данных
+    # Агрегация и отображение
     role_stats, bans_stats, blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
     total_matches = blue_side_stats["total"] + red_side_stats["total"]
     wins = blue_side_stats["wins"] + red_side_stats["wins"]
     losses = blue_side_stats["losses"] + red_side_stats["losses"]
 
-    # Общая статистика
     st.subheader("Overall Statistics")
     win_rate = f"{wins/total_matches*100:.2f}%" if total_matches > 0 else "0.00%"
     st.markdown(f"**Total Matches:** {total_matches} | **Wins:** {wins} | **Losses:** {losses} | **Win Rate:** {win_rate}")
@@ -213,7 +200,6 @@ def scrims_page():
     st.markdown(f"**Blue Side:** {blue_side_stats['wins']}/{blue_side_stats['total']} ({blue_win_rate})")
     st.markdown(f"**Red Side:** {red_side_stats['wins']}/{red_side_stats['total']} ({red_win_rate})")
 
-    # Статистика пиков по ролям
     st.subheader("Pick Statistics by Role")
     roles = ["Top", "Jungle", "Mid", "ADC", "Support"]
     cols = st.columns(len(roles))
@@ -235,7 +221,6 @@ def scrims_page():
             else:
                 st.write("No data available.")
 
-    # Статистика банов
     st.subheader("Ban Statistics")
     ban_stats = [{"Champion": champ, "Bans": count} for champ, count in bans_stats.items()]
     if ban_stats:
@@ -244,7 +229,6 @@ def scrims_page():
     else:
         st.write("No ban data available.")
 
-    # История матчей
     st.subheader("Match History")
     if match_history:
         df_history = pd.DataFrame(match_history)
@@ -253,25 +237,12 @@ def scrims_page():
     else:
         st.write("No match history available.")
 
-    # Стилизация таблиц
     st.markdown("""
         <style>
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 10px 0;
-        }
-        th, td {
-            padding: 8px;
-            text-align: left;
-            border-bottom: 1px solid #ddd;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:hover {
-            background-color: #f5f5f5;
-        }
+        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f2f2f2; }
+        tr:hover { background-color: #f5f5f5; }
         </style>
     """, unsafe_allow_html=True)
 
