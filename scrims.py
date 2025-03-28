@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 
 # Настройки для API GRID (замени на свои реальные данные)
-GRID_API_KEY = "твой_api_ключ"  # Замени на реальный ключ API GRID
+GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Замени на реальный ключ API GRID
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
