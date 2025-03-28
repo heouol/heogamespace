@@ -65,30 +65,6 @@ def normalize_team_name(team_name):
     team_exceptions = {
         "dung dynasty": "Dung Dynasty",
         "dung dynastylogo std": "Dung Dynasty",
-        "dnd": "Dung Dynasty",
-        "eintracht spandau": "Eintracht Spandau",
-        "eintracht spandaulogo std": "Eintracht Spandau",
-        "eins": "Eintracht Spandau",
-        "rossmann centaurs": "ROSSMANN Centaurs",
-        "rossmann centaurslogo std": "ROSSMANN Centaurs",
-        "ross": "ROSSMANN Centaurs",
-        "unicorns of love sexy edition": "Unicorns of Love Sexy Edition",
-        "use": "Unicorns of Love Sexy Edition",
-        "unicorns of love sexy editionlogo std": "Unicorns of Love Sexy Edition",
-        "kaufland hangry knights": "Kaufland Hangry Knights",
-        "kaufland hangry knightslogo std": "Kaufland Hangry Knights",
-        "khk": "Kaufland Hangry Knights",
-        "berlin international gaming": "Berlin International Gaming",
-        "big": "Berlin International Gaming",
-        "berlin international gaminglogo std": "Berlin International Gaming",
-        "eintracht frankfurt": "Eintracht Frankfurt",
-        "eintracht frankfurtlogo std": "Eintracht Frankfurt",
-        "sge": "Eintracht Frankfurt",
-        "austrian force willhaben": "Austrian Force willhaben",
-        "afw": "Austrian Force willhaben",
-        "tog": "teamorangegaming",
-        "e wie einfach e-sports": "E Wie Einfach E-sports",
-        "ewi": "E Wie Einfach E-sports"
     }
 
     team_name_clean = team_name.lower().replace("logo std", "").strip()
