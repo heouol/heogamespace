@@ -34,10 +34,69 @@ def check_if_worksheets_exists(spreadsheet, name):
         wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=10)
     return wks
 
-# Функция для загрузки данных серии (исправленный код знакомого)
+# Функция для получения списка всех серий через GraphQL
+def get_all_series():
+    headers = {
+        "x-api-key": GRID_API_KEY,
+        "Content-Type": "application/json"
+    }
+    query = """
+    query ($filter: SeriesFilter, $first: Int, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+        allSeries(
+            filter: $filter
+            first: $first
+            orderBy: $orderBy
+            orderDirection: $orderDirection
+        ) {
+            totalCount
+            edges {
+                node {
+                    id
+                    startTimeScheduled
+                    tournament {
+                        name
+                    }
+                    teams {
+                        name
+                    }
+                }
+            }
+        }
+    }
+    """
+    variables = {
+        "filter": {
+            "titleId": 3  # LoL
+            # Убираем фильтр по типу, чтобы увидеть все серии
+        },
+        "first": 50,  # Максимум 50 серий за раз
+        "orderBy": "StartTimeScheduled",
+        "orderDirection": "DESC"
+    }
+
+    try:
+        response = requests.post(
+            f"{GRID_BASE_URL}central-data/graphql",
+            headers=headers,
+            json={"query": query, "variables": variables}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            st.write("GraphQL Response:", data)  # Отладочный вывод
+            series = data.get("data", {}).get("allSeries", {}).get("edges", [])
+            # Фильтруем серии, где участвует Gamespace MC
+            return [s["node"] for s in series if any(team.get("name") == TEAM_NAME for team in s["node"].get("teams", []))]
+        else:
+            st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
+            return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка подключения к GraphQL API: {str(e)}")
+        return []
+
+# Функция для загрузки данных серии (GRID-формат)
 def download_series_data(series_id):
     headers = {"x-api-key": GRID_API_KEY}
-    url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"  # Исправляем URL
+    url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"
     
     try:
         response = requests.get(url, headers=headers)
@@ -50,27 +109,17 @@ def download_series_data(series_id):
         st.error(f"Ошибка подключения к GRID API: {str(e)}")
         return None
 
-# Функция для извлечения связанных Series ID (если они есть в данных)
-def extract_related_series_ids(scrim_data):
-    # Предполагаем, что связанные Series ID могут быть в данных (нужно проверить структуру)
-    related_ids = []
-    # Пример: если есть поле "relatedSeries" или "tournament" с другими сериями
-    tournament_data = scrim_data.get("tournament", {})
-    if isinstance(tournament_data, dict):
-        related_series = tournament_data.get("series", [])
-        related_ids.extend([s.get("id") for s in related_series if s.get("id")])
-    return related_ids
-
 # Функция для обновления данных в Google Sheets
-def update_scrims_data(worksheet, series_ids):
-    if not series_ids:
+def update_scrims_data(worksheet, series_list):
+    if not series_list:
         return False
     
     existing_data = worksheet.get_all_values()
     existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
     new_rows = []
     
-    for series_id in series_ids:
+    for series in series_list:
+        series_id = series.get("id")
         scrim_data = download_series_data(series_id)
         if not scrim_data:
             continue
@@ -85,34 +134,48 @@ def update_scrims_data(worksheet, series_ids):
         teams = scrim_data.get("teams", [{}, {}])
         is_blue_side = teams[0].get("name") == TEAM_NAME
         opponent = teams[1].get("name", "Unknown") if is_blue_side else teams[0].get("name", "Unknown")
-        win = scrim_data.get("winner", {}).get("name") == TEAM_NAME
-        date = scrim_data.get("startTime", scrim_data.get("date", "N/A"))
+        win = teams[0].get("won", False) if teams[0].get("name") == TEAM_NAME else teams[1].get("won", False)
+        date = scrim_data.get("startTime", series.get("startTimeScheduled", scrim_data.get("updatedAt", "N/A")))
         if date != "N/A" and "T" in date:
-            date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S.%fZ").strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                date = datetime.strptime(date, "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
         
-        # Извлекаем патч из данных (предполагаем, что он есть в scrim_data)
-        patch = scrim_data.get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
+        # Извлекаем патч из games[0].stats
+        games = scrim_data.get("games", [{}])
+        game = games[0] if games else {}
+        patch = game.get("stats", {}).get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
         patch = ".".join(patch) if patch != "N/A" else "N/A"
         
         new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A", patch]
         
-        # Пики
-        participants = scrim_data.get("participants", [])
-        picks = [f"{p.get('role', 'N/A')}:{p.get('champion', 'N/A')}" for p in participants if p.get("team") == TEAM_NAME]
-        new_row.extend(picks)
+        # Пики и баны из games[0].draftActions
+        draft_actions = game.get("draftActions", [])
+        picks = []
+        bans = []
+        pick_order = 0  # Для определения ролей
+        role_mapping = {0: "Top", 1: "Jungle", 2: "Mid", 3: "ADC", 4: "Support"}
         
-        # Баны
-        bans = scrim_data.get("bans", {}).get(TEAM_NAME, [])
+        for action in draft_actions:
+            action_type = action.get("type")
+            champion = action.get("draftable", {}).get("name")
+            team_id = action.get("drafter", {}).get("id")
+            if not champion or not team_id:
+                continue
+            if team_id == "19770":  # Gamespace MC
+                if action_type == "pick":
+                    role = role_mapping.get(pick_order, "N/A")
+                    picks.append(f"{role}:{champion}")
+                    pick_order += 1
+                elif action_type == "ban":
+                    bans.append(champion)
+        
+        new_row.extend(picks)
         new_row.append(",".join(bans) if bans else "N/A")
         
         new_rows.append(new_row)
         existing_match_ids.add(match_id)
-        
-        # Пробуем извлечь связанные Series ID
-        related_ids = extract_related_series_ids(scrim_data)
-        for related_id in related_ids:
-            if related_id not in series_ids and related_id not in existing_match_ids:
-                series_ids.append(related_id)
     
     if new_rows:
         worksheet.append_rows(new_rows)
@@ -210,17 +273,17 @@ def scrims_page():
     if not wks.get_all_values():
         wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Patch", "Picks", "Bans"])
 
-    # Поле для ввода начального Series ID
-    initial_series_id = st.text_input("Enter Initial Series ID (e.g., 2783620)", value="2783620")
-    
-    # Кнопка для загрузки данных
-    if st.button("Download Scrims Data"):
+    # Кнопка для загрузки всех серий
+    if st.button("Download All Scrims Data"):
         with st.spinner("Downloading scrims data from GRID API..."):
-            series_ids = [initial_series_id]  # Начинаем с введённого Series ID
-            if update_scrims_data(wks, series_ids):
-                st.success("Scrims data downloaded and updated!")
+            series_list = get_all_series()
+            if series_list:
+                if update_scrims_data(wks, series_list):
+                    st.success("Scrims data downloaded and updated!")
+                else:
+                    st.warning("No new data added (possibly duplicates or error).")
             else:
-                st.warning("No new data added (possibly duplicates or error).")
+                st.warning("No series found for Gamespace MC.")
 
     # Получаем данные для фильтрации
     _, _, _, _, patches = aggregate_scrims_data(wks)
