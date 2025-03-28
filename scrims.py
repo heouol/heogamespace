@@ -57,7 +57,9 @@ def get_all_series():
                         name
                     }
                     teams {
-                        name
+                        team {
+                            name
+                        }
                     }
                 }
             }
@@ -85,7 +87,7 @@ def get_all_series():
             st.write("GraphQL Response:", data)  # Отладочный вывод
             series = data.get("data", {}).get("allSeries", {}).get("edges", [])
             # Фильтруем серии, где участвует Gamespace MC
-            return [s["node"] for s in series if any(team.get("name") == TEAM_NAME for team in s["node"].get("teams", []))]
+            return [s["node"] for s in series if any(team.get("team", {}).get("name") == TEAM_NAME for team in s["node"].get("teams", []))]
         else:
             st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
             return []
