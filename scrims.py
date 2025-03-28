@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import pandas as pd
-from collections import defaultdict
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
@@ -56,12 +55,6 @@ def get_all_series():
                     tournament {
                         name
                     }
-                    teams {
-                        id
-                        participant {
-                            name
-                        }
-                    }
                 }
             }
         }
@@ -87,16 +80,7 @@ def get_all_series():
             data = response.json()
             st.write("GraphQL Response:", data)  # Отладочный вывод
             series = data.get("data", {}).get("allSeries", {}).get("edges", [])
-            # Фильтруем серии, где участвует Gamespace MC
-            filtered_series = []
-            for s in series:
-                teams = s["node"].get("teams", [])
-                team_names = [team.get("participant", {}).get("name", "Unknown") for team in teams]
-                st.write(f"Series {s['node']['id']} Teams:", team_names)  # Отладочный вывод
-                if TEAM_NAME in team_names:
-                    filtered_series.append(s["node"])
-            st.write(f"Filtered Series for {TEAM_NAME}:", filtered_series)  # Отладочный вывод
-            return filtered_series
+            return [s["node"] for s in series]
         else:
             st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
             return []
@@ -138,13 +122,17 @@ def update_scrims_data(worksheet, series_list):
         # Отладочный вывод
         st.write(f"Данные для Series {series_id}:", scrim_data)
         
+        # Проверяем, участвует ли Gamespace MC
+        teams = scrim_data.get("teams", [{}, {}])
+        team_0_name = teams[0].get("name", "Unknown")
+        team_1_name = teams[1].get("name", "Unknown")
+        if TEAM_NAME not in [team_0_name, team_1_name]:
+            continue
+        
         match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id)))
         if match_id in existing_match_ids:
             continue
         
-        teams = scrim_data.get("teams", [{}, {}])
-        team_0_name = teams[0].get("name", "Unknown")
-        team_1_name = teams[1].get("name", "Unknown")
         is_blue_side = team_0_name == TEAM_NAME
         opponent = team_1_name if is_blue_side else team_0_name
         win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
@@ -159,45 +147,7 @@ def update_scrims_data(worksheet, series_list):
                 except ValueError:
                     date = "N/A"
         
-        # Извлекаем патч из games[0].stats
-        games = scrim_data.get("games", [{}])
-        if not games:
-            st.warning(f"Series {series_id} не содержит игр (games пустое).")
-            continue
-        game = games[0]
-        stats = game.get("stats", {})
-        st.write(f"Stats для Series {series_id}:", stats)  # Отладочный вывод
-        patch = stats.get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
-        patch = ".".join(patch) if patch != "N/A" else "N/A"
-        
-        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss", "N/A", patch]
-        
-        # Пики и баны из games[0].draftActions
-        draft_actions = game.get("draftActions", [])
-        st.write(f"Draft Actions для Series {series_id}:", draft_actions)  # Отладочный вывод
-        picks = []
-        bans = []
-        pick_order = 0  # Для определения ролей
-        role_mapping = {0: "Top", 1: "Jungle", 2: "Mid", 3: "ADC", 4: "Support"}
-        
-        for action in draft_actions:
-            action_type = action.get("type")
-            champion = action.get("draftable", {}).get("name")
-            team_id = action.get("drafter", {}).get("id")
-            if not champion or not team_id:
-                continue
-            # Проверяем, является ли команда Gamespace MC
-            team_name = team_0_name if team_id == teams[0].get("id") else team_1_name
-            if team_name == TEAM_NAME:
-                if action_type == "pick":
-                    role = role_mapping.get(pick_order, "N/A")
-                    picks.append(f"{role}:{champion}")
-                    pick_order += 1
-                elif action_type == "ban":
-                    bans.append(champion)
-        
-        new_row.extend(picks)
-        new_row.append(",".join(bans) if bans else "N/A")
+        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss"]
         
         new_rows.append(new_row)
         existing_match_ids.add(match_id)
@@ -208,35 +158,20 @@ def update_scrims_data(worksheet, series_list):
     return False
 
 # Функция для агрегации данных из Google Sheets
-def aggregate_scrims_data(worksheet, selected_patch=None):
-    role_stats = {
-        "Top": defaultdict(lambda: {"games": 0, "wins": 0}),
-        "Jungle": defaultdict(lambda: {"games": 0, "wins": 0}),
-        "Mid": defaultdict(lambda: {"games": 0, "wins": 0}),
-        "ADC": defaultdict(lambda: {"games": 0, "wins": 0}),
-        "Support": defaultdict(lambda: {"games": 0, "wins": 0})
-    }
+def aggregate_scrims_data(worksheet):
     blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
     red_side_stats = {"wins": 0, "losses": 0, "total": 0}
     match_history = []
-    patches = set()
 
     data = worksheet.get_all_values()
     if len(data) <= 1:
-        return role_stats, blue_side_stats, red_side_stats, match_history, patches
+        return blue_side_stats, red_side_stats, match_history
 
     for row in data[1:]:
-        if len(row) < 7:  # Учитываем новую колонку Patch
+        if len(row) < 5:  # Минимально ожидаем Date, Match ID, Opponent, Side, Result
             continue
         
-        date, match_id, opponent, side, result, vod, patch, *rest = row
-        bans = row[-1] if len(row) > 7 else "N/A"
-        
-        # Фильтрация по патчу
-        if selected_patch and patch != selected_patch:
-            continue
-        
-        patches.add(patch)
+        date, match_id, opponent, side, result = row[:5]
         win = result == "Win"
         is_blue_side = side == "Blue"
 
@@ -253,25 +188,14 @@ def aggregate_scrims_data(worksheet, selected_patch=None):
             else:
                 red_side_stats["losses"] += 1
 
-        picks = row[7:-1] if len(row) > 7 else []
-        for pick in picks:
-            if ":" in pick:
-                role, champion = pick.split(":", 1)
-                if role in role_stats and champion != "N/A":
-                    role_stats[role][champion]["games"] += 1
-                    if win:
-                        role_stats[role][champion]["wins"] += 1
-
         match_history.append({
             "Date": date,
             "Opponent": opponent,
             "Side": side,
-            "Result": result,
-            "VOD": vod,
-            "Bans": bans
+            "Result": result
         })
 
-    return role_stats, blue_side_stats, red_side_stats, match_history, patches
+    return blue_side_stats, red_side_stats, match_history
 
 # Основная функция страницы
 def scrims_page():
@@ -281,7 +205,7 @@ def scrims_page():
         st.session_state.current_page = "Hellenic Legends League Stats"
         st.rerun()
 
-    client = setup_google_sheets()
+    client =植物_google_sheets()
     if not client:
         return
 
@@ -296,7 +220,7 @@ def scrims_page():
 
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
-        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result", "VOD", "Patch", "Picks", "Bans"])
+        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result"])
 
     # Кнопка для загрузки всех серий
     if st.button("Download All Scrims Data"):
@@ -310,16 +234,8 @@ def scrims_page():
             else:
                 st.warning("No series found for Gamespace MC.")
 
-    # Получаем данные для фильтрации
-    _, _, _, _, patches = aggregate_scrims_data(wks)
-    patches = sorted([p for p in patches if p != "N/A"])
-    
-    # Выпадающий список для фильтрации по патчу
-    selected_patch = st.selectbox("Filter by Patch", ["All"] + patches, index=0)
-    selected_patch = None if selected_patch == "All" else selected_patch
-
     # Агрегация и отображение
-    role_stats, blue_side_stats, red_side_stats, match_history, _ = aggregate_scrims_data(wks, selected_patch)
+    blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
     total_matches = blue_side_stats["total"] + red_side_stats["total"]
     wins = blue_side_stats["wins"] + red_side_stats["wins"]
     losses = blue_side_stats["losses"] + red_side_stats["losses"]
@@ -332,31 +248,9 @@ def scrims_page():
     st.markdown(f"**Blue Side:** {blue_side_stats['wins']}/{blue_side_stats['total']} ({blue_win_rate})")
     st.markdown(f"**Red Side:** {red_side_stats['wins']}/{red_side_stats['total']} ({red_win_rate})")
 
-    st.subheader("Pick Statistics by Role")
-    roles = ["Top", "Jungle", "Mid", "ADC", "Support"]
-    cols = st.columns(len(roles))
-    for i, role in enumerate(roles):
-        with cols[i]:
-            st.write(f"**{role}**")
-            stats = []
-            for champ, data in role_stats[role].items():
-                win_rate = data["wins"] / data["games"] * 100 if data["games"] > 0 else 0
-                stats.append({
-                    "Champion": champ,
-                    "Games": data["games"],
-                    "Wins": data["wins"],
-                    "Win Rate (%)": f"{win_rate:.2f}"
-                })
-            if stats:
-                df = pd.DataFrame(stats).sort_values("Games", ascending=False)
-                st.markdown(df.to_html(index=False, escape=False), unsafe_allow_html=True)
-            else:
-                st.write("No data available.")
-
     st.subheader("Match History")
     if match_history:
         df_history = pd.DataFrame(match_history)
-        df_history["VOD"] = df_history["VOD"].apply(lambda x: f'<a href="{x}" target="_blank">Watch</a>' if x != "N/A" else "N/A")
         st.markdown(df_history.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
         st.write("No match history available.")
