@@ -1,0 +1,200 @@
+import streamlit as st
+import requests
+import pandas as pd
+from io import BytesIO
+from collections import defaultdict
+
+# Настройки для API GRID (замени на свои реальные данные)
+GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"  # Замени на реальный ключ API GRID
+GRID_BASE_URL = "https://api.grid.gg/"
+TEAM_NAME = "Gamespace MC"
+TOURNAMENT_NAME = "League of Legends Scrims"
+
+# Функция для получения данных из GRID API
+def get_scrims_data(patch=None):
+    headers = {"Authorization": f"Bearer {GRID_API_KEY}"}
+    params = {"tournament": TOURNAMENT_NAME, "team": TEAM_NAME}
+    if patch:
+        params["patch"] = patch
+    
+    try:
+        response = requests.get(f"{GRID_BASE_URL}/matches", headers=headers, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Ошибка API: {response.status_code} - {response.text}")
+            return []
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка подключения к GRID API: {str(e)}")
+        return []
+
+# Функция для экспорта данных в Excel
+def to_excel(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Scrims Data')
+    return output.getvalue()
+
+# Основная функция страницы Scrims
+def scrims_page():
+    st.title("Scrims - Gamespace MC")
+
+    # Кнопка возврата на главную страницу
+    if st.button("Back to Hellenic Legends League Stats"):
+        st.session_state.current_page = "Hellenic Legends League Stats"
+        st.rerun()
+
+    # Фильтр по патчу
+    selected_patch = st.text_input("Filter by Patch (e.g., 14.5)", value="")
+    scrims_data = get_scrims_data(selected_patch if selected_patch else None)
+
+    if not scrims_data:
+        st.warning("No scrim data available for this patch.")
+        return
+
+    # Инициализация статистики
+    role_stats = {
+        "Top": defaultdict(lambda: {"games": 0, "wins": 0}),
+        "Jungle": defaultdict(lambda: {"games": 0, "wins": 0}),
+        "Mid": defaultdict(lambda: {"games": 0, "wins": 0}),
+        "ADC": defaultdict(lambda: {"games": 0, "wins": 0}),
+        "Support": defaultdict(lambda: {"games": 0, "wins": 0})
+    }
+    bans_stats = defaultdict(int)
+    total_matches = 0
+    wins = 0
+    losses = 0
+    blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
+    red_side_stats = {"wins": 0, "losses": 0, "total": 0}
+    match_history = []
+
+    # Обработка данных из API
+    for match in scrims_data:
+        total_matches += 1
+        is_blue_side = match.get("team1", {}).get("name") == TEAM_NAME
+        opponent = match.get("team2", {}).get("name") if is_blue_side else match.get("team1", {}).get("name")
+        win = match.get("winner") == TEAM_NAME
+        
+        if win:
+            wins += 1
+        else:
+            losses += 1
+        
+        # Статистика по сторонам
+        if is_blue_side:
+            blue_side_stats["total"] += 1
+            if win:
+                blue_side_stats["wins"] += 1
+            else:
+                blue_side_stats["losses"] += 1
+        else:
+            red_side_stats["total"] += 1
+            if win:
+                red_side_stats["wins"] += 1
+            else:
+                red_side_stats["losses"] += 1
+
+        # Статистика по ролям и пикам
+        participants = match.get("participants", [])
+        for player in participants:
+            if player.get("team") == TEAM_NAME:
+                role = player.get("role")
+                champion = player.get("champion", "N/A")
+                if role in role_stats and champion != "N/A":
+                    role_stats[role][champion]["games"] += 1
+                    if win:
+                        role_stats[role][champion]["wins"] += 1
+
+        # Статистика банов
+        bans = match.get("bans", {}).get(TEAM_NAME, [])
+        for ban in bans:
+            bans_stats[ban] += 1
+
+        # История матчей
+        match_history.append({
+            "Date": match.get("date", "N/A"),
+            "Opponent": opponent,
+            "Side": "Blue" if is_blue_side else "Red",
+            "Result": "Win" if win else "Loss",
+            "VOD": match.get("vod_url", "N/A")
+        })
+
+    # Общая статистика
+    st.subheader("Overall Statistics")
+    st.markdown(f"**Total Matches:** {total_matches} | **Wins:** {wins} | **Losses:** {losses} | **Win Rate:** {wins/total_matches*100:.2f}%")
+    st.markdown(f"**Blue Side:** {blue_side_stats['wins']}/{blue_side_stats['total']} ({blue_side_stats['wins']/blue_side_stats['total']*100:.2f}%)")
+    st.markdown(f"**Red Side:** {red_side_stats['wins']}/{red_side_stats['total']} ({red_side_stats['wins']/red_side_stats['total']*100:.2f}%)")
+
+    # Статистика пиков по ролям
+    st.subheader("Pick Statistics by Role")
+    roles = ["Top", "Jungle", "Mid", "ADC", "Support"]
+    cols = st.columns(len(roles))
+    for i, role in enumerate(roles):
+        with cols[i]:
+            st.write(f"**{role}**")
+            stats = []
+            for champ, data in role_stats[role].items():
+                win_rate = data["wins"] / data["games"] * 100 if data["games"] > 0 else 0
+                stats.append({
+                    "Champion": champ,
+                    "Games": data["games"],
+                    "Wins": data["wins"],
+                    "Win Rate (%)": f"{win_rate:.2f}"
+                })
+            if stats:
+                df = pd.DataFrame(stats).sort_values("Games", ascending=False)
+                st.markdown(df.to_html(index=False, escape=False), unsafe_allow_html=True)
+            else:
+                st.write("No data available.")
+
+    # Статистика банов
+    st.subheader("Ban Statistics")
+    ban_stats = [{"Champion": champ, "Bans": count} for champ, count in bans_stats.items()]
+    if ban_stats:
+        df_bans = pd.DataFrame(ban_stats).sort_values("Bans", ascending=False)
+        st.markdown(df_bans.to_html(index=False, escape=False), unsafe_allow_html=True)
+    else:
+        st.write("No ban data available.")
+
+    # История матчей
+    st.subheader("Match History")
+    if match_history:
+        df_history = pd.DataFrame(match_history)
+        df_history["VOD"] = df_history["VOD"].apply(lambda x: f'<a href="{x}" target="_blank">Watch</a>' if x != "N/A" else "N/A")
+        st.markdown(df_history.to_html(index=False, escape=False), unsafe_allow_html=True)
+
+        # Кнопка для экспорта в Excel
+        excel_data = to_excel(df_history)
+        st.download_button(
+            label="Download Match History as Excel",
+            data=excel_data,
+            file_name=f"scrims_history_{TEAM_NAME}_{selected_patch or 'all'}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.write("No match history available.")
+
+    # Стилизация таблиц
+    st.markdown("""
+        <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    scrims_page()
