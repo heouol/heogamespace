@@ -13,7 +13,7 @@ GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
-SHEET_NAME = "Scrims_GMS_Detailed"  # Новая таблица, чтобы не конфликтовать со старой
+SHEET_NAME = "Scrims_GMS_Detailed"
 
 # Настройка Google Sheets
 def setup_google_sheets():
@@ -156,12 +156,13 @@ def update_scrims_data(worksheet, series_list):
     existing_match_ids = set(row[2] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID в столбце 3
     new_rows = []
     gamespace_series_count = 0  # Счётчик серий для Gamespace MC
+    skipped_duplicates = 0  # Счётчик пропущенных дубликатов
     
     for i, series in enumerate(series_list):
         series_id = series.get("id")
-        # Добавляем задержку между запросами (0.5 секунды)
+        # Добавляем задержку между запросами (1 секунда)
         if i > 0:
-            time.sleep(0.5)
+            time.sleep(1.0)
         
         scrim_data = download_series_data(series_id)
         if not scrim_data:
@@ -183,6 +184,8 @@ def update_scrims_data(worksheet, series_list):
         
         match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id)))
         if match_id in existing_match_ids:
+            st.write(f"Серия {series_id} уже существует в таблице (Match ID: {match_id}). Пропускаем.")
+            skipped_duplicates += 1
             continue
         
         # Дата
@@ -238,10 +241,18 @@ def update_scrims_data(worksheet, series_list):
         new_rows.append(new_row)
         existing_match_ids.add(match_id)
     
-    st.write(f"Всего серий для Gamespace MC: {gamespace_series_count}")  # Отладочный вывод
+    st.write(f"Всего серий для Gamespace MC: {gamespace_series_count}")
+    st.write(f"Пропущено дубликатов: {skipped_duplicates}")
+    st.write(f"Новых строк для добавления: {len(new_rows)}")
+    
     if new_rows:
-        worksheet.append_rows(new_rows)
-        return True
+        try:
+            worksheet.append_rows(new_rows)
+            st.write(f"Успешно добавлено {len(new_rows)} строк в Google Sheets.")
+            return True
+        except Exception as e:
+            st.error(f"Ошибка при добавлении данных в Google Sheets: {str(e)}")
+            return False
     return False
 
 # Функция для агрегации данных из Google Sheets
