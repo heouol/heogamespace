@@ -13,7 +13,7 @@ GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
 TOURNAMENT_NAME = "League of Legends Scrims"
-SHEET_NAME = "Scrims_GMS_Detailed"  # Новая таблица, чтобы не конфликтовать со старой
+SHEET_NAME = "Scrims_GMS"  # Возвращаемся к старой таблице
 
 # Настройка Google Sheets
 def setup_google_sheets():
@@ -31,7 +31,7 @@ def check_if_worksheets_exists(spreadsheet, name):
     try:
         wks = spreadsheet.worksheet(name)
     except gspread.exceptions.WorksheetNotFound:
-        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=24)  # 24 столбца
+        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=5)  # 5 столбцов
     return wks
 
 # Функция для получения списка всех серий через GraphQL с пагинацией
@@ -115,7 +115,7 @@ def get_all_series():
 
     return all_series
 
-# Функция для загрузки данных серии (GRID-формат) с обработкой 429
+# Функция для загрузки данных серии (GRID-формат) с обработкой 429 и 404
 def download_series_data(series_id, max_retries=3, initial_delay=5):
     headers = {"x-api-key": GRID_API_KEY}
     url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"
@@ -130,6 +130,9 @@ def download_series_data(series_id, max_retries=3, initial_delay=5):
                 st.warning(f"Ошибка 429 для Series {series_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
                 time.sleep(delay)
                 continue
+            elif response.status_code == 404:  # Not Found
+                st.warning(f"Серия {series_id} не найдена (404). Пропускаем.")
+                return None
             else:
                 st.error(f"Ошибка API для Series {series_id}: {response.status_code} - {response.text}")
                 return None
@@ -146,7 +149,7 @@ def update_scrims_data(worksheet, series_list):
         return False
     
     existing_data = worksheet.get_all_values()
-    existing_match_ids = set(row[2] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID в столбце 3
+    existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
     new_rows = []
     
     for i, series in enumerate(series_list):
@@ -160,11 +163,7 @@ def update_scrims_data(worksheet, series_list):
             continue
         
         # Проверяем, участвует ли Gamespace MC
-        teams = scrim_data.get("teams", None)
-        if not teams or len(teams) < 2:
-            st.warning(f"Не удалось найти команды для Series {series_id}. Пропускаем. Данные: {scrim_data}")
-            continue
-        
+        teams = scrim_data.get("teams", [{}, {}])
         team_0_name = teams[0].get("name", "Unknown")
         team_1_name = teams[1].get("name", "Unknown")
         if TEAM_NAME not in [team_0_name, team_1_name]:
@@ -174,7 +173,10 @@ def update_scrims_data(worksheet, series_list):
         if match_id in existing_match_ids:
             continue
         
-        # Дата
+        is_blue_side = team_0_name == TEAM_NAME
+        opponent = team_1_name if is_blue_side else team_0_name
+        win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
+        
         date = scrim_data.get("startTime", series.get("startTimeScheduled", scrim_data.get("updatedAt", "N/A")))
         if date != "N/A" and "T" in date:
             try:
@@ -185,44 +187,7 @@ def update_scrims_data(worksheet, series_list):
                 except ValueError:
                     date = "N/A"
         
-        # Патч
-        patch = scrim_data.get("patch", scrim_data.get("gameVersion", "N/A"))
-        
-        # Команды
-        blue_team = team_0_name  # Команда 0 — синяя сторона
-        red_team = team_1_name   # Команда 1 — красная сторона
-        
-        # Баны
-        draft = scrim_data.get("draft", {})
-        blue_bans = draft.get("bans", {}).get("team0", ["N/A"] * 5)[:5]  # Баны синей стороны
-        red_bans = draft.get("bans", {}).get("team1", ["N/A"] * 5)[:5]   # Баны красной стороны
-        
-        # Пики
-        participants = scrim_data.get("participants", [])
-        blue_picks = ["N/A"] * 5
-        red_picks = ["N/A"] * 5
-        for i, participant in enumerate(participants[:10]):  # Первые 10 участников (5 синих, 5 красных)
-            champion = participant.get("champion", "N/A")
-            if i < 5:  # Синяя сторона
-                blue_picks[i] = champion
-            else:  # Красная сторона
-                red_picks[i - 5] = champion
-        
-        # Длительность
-        duration = scrim_data.get("duration", scrim_data.get("gameDuration", "N/A"))
-        if isinstance(duration, (int, float)):
-            duration = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Переводим секунды в формат MM:SS
-        
-        # Победа или поражение
-        win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
-        result = "Win" if win else "Loss"
-        
-        # Формируем строку
-        new_row = [
-            date, patch, match_id, blue_team, red_team,
-            *blue_bans, *red_bans, *blue_picks, *red_picks,
-            duration, result
-        ]
+        new_row = [date, match_id, opponent, "Blue" if is_blue_side else "Red", "Win" if win else "Loss"]
         
         new_rows.append(new_row)
         existing_match_ids.add(match_id)
@@ -243,12 +208,12 @@ def aggregate_scrims_data(worksheet):
         return blue_side_stats, red_side_stats, match_history
 
     for row in data[1:]:
-        if len(row) < 24:  # Ожидаем 24 столбца
+        if len(row) < 5:  # Минимально ожидаем Date, Match ID, Opponent, Side, Result
             continue
         
-        date, patch, match_id, blue_team, red_team, *_, duration, result = row
+        date, match_id, opponent, side, result = row[:5]
         win = result == "Win"
-        is_blue_side = blue_team == TEAM_NAME
+        is_blue_side = side == "Blue"
 
         if is_blue_side:
             blue_side_stats["total"] += 1
@@ -265,11 +230,8 @@ def aggregate_scrims_data(worksheet):
 
         match_history.append({
             "Date": date,
-            "Patch": patch,
-            "Match ID": match_id,
-            "Blue Team": blue_team,
-            "Red Team": red_team,
-            "Duration": duration,
+            "Opponent": opponent,
+            "Side": side,
             "Result": result
         })
 
@@ -298,14 +260,7 @@ def scrims_page():
 
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
-        wks.append_row([
-            "Date", "Patch", "Match ID", "Blue Team", "Red Team",
-            "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5",
-            "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5",
-            "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5",
-            "Red Pick 1", "Red Pick 2", "Red Pick 3", "Red Pick 4", "Red Pick 5",
-            "Duration", "Result"
-        ])
+        wks.append_row(["Date", "Match ID", "Opponent", "Side", "Result"])
 
     # Кнопка для загрузки всех серий
     if st.button("Download All Scrims Data"):
