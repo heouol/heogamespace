@@ -157,6 +157,7 @@ def update_scrims_data(worksheet, series_list):
     new_rows = []
     gamespace_series_count = 0  # Счётчик серий для Gamespace MC
     skipped_duplicates = 0  # Счётчик пропущенных дубликатов
+    debug_printed = False  # Флаг для вывода scrim_data только один раз
     
     for i, series in enumerate(series_list):
         series_id = series.get("id")
@@ -181,6 +182,11 @@ def update_scrims_data(worksheet, series_list):
         
         gamespace_series_count += 1  # Увеличиваем счётчик
         st.write(f"Найдена серия для Gamespace MC (Series {series_id}): {team_0_name} vs {team_1_name}")
+        
+        # Выводим scrim_data для отладки (только один раз)
+        if not debug_printed:
+            st.write(f"Структура данных scrim_data для Series {series_id}:", scrim_data)
+            debug_printed = True
         
         match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id)))
         if match_id in existing_match_ids:
@@ -363,12 +369,27 @@ def scrims_page():
     else:
         st.write("No match history available.")
 
+    # Обновлённый CSS для тёмной темы
     st.markdown("""
         <style>
-        table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #f2f2f2; }
-        tr:hover { background-color: #f5f5f5; }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin: 10px 0; 
+            background-color: #1e1e1e; 
+            color: #ffffff; 
+        }
+        th, td { 
+            padding: 8px; 
+            text-align: left; 
+            border-bottom: 1px solid #444444; 
+        }
+        th { 
+            background-color: #333333; 
+        }
+        tr:hover { 
+            background-color: #2a2a2a; 
+        }
         </style>
     """, unsafe_allow_html=True)
 
