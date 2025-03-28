@@ -68,10 +68,10 @@ def get_all_series():
     """
     variables = {
         "filter": {
-            "titleId": 3  # LoL
-            # Убираем фильтр по типу, чтобы увидеть все серии
+            "titleId": 3,  # LoL
+            "types": "SCRIM"  # Ищем только скримы
         },
-        "first": 50,  # Максимум 50 серий за раз
+        "first": 100,  # Увеличиваем до 100
         "orderBy": "StartTimeScheduled",
         "orderDirection": "DESC"
     }
@@ -87,7 +87,15 @@ def get_all_series():
             st.write("GraphQL Response:", data)  # Отладочный вывод
             series = data.get("data", {}).get("allSeries", {}).get("edges", [])
             # Фильтруем серии, где участвует Gamespace MC
-            return [s["node"] for s in series if any(team.get("team", {}).get("name") == TEAM_NAME for team in s["node"].get("teams", []))]
+            filtered_series = []
+            for s in series:
+                teams = s["node"].get("teams", [])
+                team_names = [team.get("team", {}).get("name", "Unknown") for team in teams]
+                st.write(f"Series {s['node']['id']} Teams:", team_names)  # Отладочный вывод
+                if TEAM_NAME in team_names:
+                    filtered_series.append(s["node"])
+            st.write(f"Filtered Series for {TEAM_NAME}:", filtered_series)  # Отладочный вывод
+            return filtered_series
         else:
             st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
             return []
@@ -152,7 +160,10 @@ def update_scrims_data(worksheet, series_list):
         
         # Извлекаем патч из games[0].stats
         games = scrim_data.get("games", [{}])
-        game = games[0] if games else {}
+        if not games:
+            st.warning(f"Series {series_id} не содержит игр (games пустое).")
+            continue
+        game = games[0]
         stats = game.get("stats", {})
         st.write(f"Stats для Series {series_id}:", stats)  # Отладочный вывод
         patch = stats.get("gameVersion", "N/A").split(".")[:2]  # Например, "14.5.1" -> "14.5"
