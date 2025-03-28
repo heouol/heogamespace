@@ -5,7 +5,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Настройки
 GRID_API_KEY = "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63"
@@ -33,21 +33,26 @@ def check_if_worksheets_exists(spreadsheet, name):
         wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=10)
     return wks
 
-# Функция для получения списка всех серий через GraphQL
+# Функция для получения списка всех серий через GraphQL с пагинацией
 def get_all_series():
     headers = {
         "x-api-key": GRID_API_KEY,
         "Content-Type": "application/json"
     }
     query = """
-    query ($filter: SeriesFilter, $first: Int, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+    query ($filter: SeriesFilter, $first: Int, $after: String, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
         allSeries(
             filter: $filter
             first: $first
+            after: $after
             orderBy: $orderBy
             orderDirection: $orderDirection
         ) {
             totalCount
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
             edges {
                 node {
                     id
@@ -60,33 +65,55 @@ def get_all_series():
         }
     }
     """
+    # Устанавливаем дату начала поиска (например, последние 6 месяцев)
+    six_months_ago = (datetime.utcnow() - timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
     variables = {
         "filter": {
             "titleId": 3,  # LoL
-            "types": "SCRIM"  # Ищем только скримы
+            "types": "SCRIM",  # Возвращаем фильтр для скримов
+            "startTimeScheduled": {
+                "gte": six_months_ago  # Ищем матчи за последние 6 месяцев
+            }
         },
-        "first": 100,  # Увеличиваем до 100
+        "first": 50,  # Соответствует ограничению API
         "orderBy": "StartTimeScheduled",
         "orderDirection": "DESC"
     }
 
-    try:
-        response = requests.post(
-            f"{GRID_BASE_URL}central-data/graphql",
-            headers=headers,
-            json={"query": query, "variables": variables}
-        )
-        if response.status_code == 200:
-            data = response.json()
-            st.write("GraphQL Response:", data)  # Отладочный вывод
-            series = data.get("data", {}).get("allSeries", {}).get("edges", [])
-            return [s["node"] for s in series]
-        else:
-            st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
+    all_series = []
+    has_next_page = True
+    after_cursor = None
+
+    while has_next_page:
+        if after_cursor:
+            variables["after"] = after_cursor
+
+        try:
+            response = requests.post(
+                f"{GRID_BASE_URL}central-data/graphql",
+                headers=headers,
+                json={"query": query, "variables": variables}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                st.write("GraphQL Response:", data)  # Отладочный вывод
+                all_series_data = data.get("data", {}).get("allSeries", {})
+                series = all_series_data.get("edges", [])
+                all_series.extend([s["node"] for s in series])
+
+                # Проверяем, есть ли следующая страница
+                page_info = all_series_data.get("pageInfo", {})
+                has_next_page = page_info.get("hasNextPage", False)
+                after_cursor = page_info.get("endCursor", None)
+            else:
+                st.error(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
+                return []
+        except requests.exceptions.RequestException as e:
+            st.error(f"Ошибка подключения к GraphQL API: {str(e)}")
             return []
-    except requests.exceptions.RequestException as e:
-        st.error(f"Ошибка подключения к GraphQL API: {str(e)}")
-        return []
+
+    return all_series
 
 # Функция для загрузки данных серии (GRID-формат)
 def download_series_data(series_id):
@@ -121,6 +148,9 @@ def update_scrims_data(worksheet, series_list):
         
         # Отладочный вывод
         st.write(f"Данные для Series {series_id}:", scrim_data)
+        # Проверяем тип серии
+        series_type = scrim_data.get("type", scrim_data.get("seriesType", "Unknown"))
+        st.write(f"Тип серии для Series {series_id}: {series_type}")
         
         # Проверяем, участвует ли Gamespace MC
         teams = scrim_data.get("teams", [{}, {}])
@@ -205,7 +235,7 @@ def scrims_page():
         st.session_state.current_page = "Hellenic Legends League Stats"
         st.rerun()
 
-    client = setup_google_sheets()  # Исправлено: заменили 植物_google_sheets() на setup_google_sheets()
+    client = setup_google_sheets()
     if not client:
         return
 
