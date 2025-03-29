@@ -332,9 +332,30 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         new_rows.append(new_row); existing_ids.add(m_id); processed += 1
     progress_bar.progress(1.0, text="Updating sheet...")
     summary = [f"\n--- Summary ---", f"Checked:{total}", f"{TEAM_NAME}:{gms_count}", f"Dupes:{skip_dupes}", f"Processed:{processed}", f"New:{len(new_rows)}"]
-    debug_logs.extend(summary) # Use local debug_logs list
-    if new_rows: try: worksheet.append_rows(new_rows, value_input_option='USER_ENTERED'); st.success(f"Added {len(new_rows)} scrims."); return True; except Exception as e: st.error(f"Append err:{e}"); return False
-    else: st.info("No new scrims."); return False
+     debug_logs.extend(summary) # Используем локальный список debug_logs
+
+    # --- ИСПРАВЛЕННЫЙ БЛОК ---
+    if new_rows:
+        try:
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            # debug_logs.append(f"Success: Appended {len(new_rows)} rows.") # Опциональный лог
+            st.success(f"Added {len(new_rows)} new scrim records.")
+            # aggregate_scrims_data.clear() # Clear cache only if caching is re-enabled later
+            return True # Успешное добавление
+        except gspread.exceptions.APIError as e_api: # Ловим специфичные ошибки gspread
+             error_msg = f"GSpread API Error appending rows: {e_api}"
+             debug_logs.append(error_msg)
+             st.error(error_msg)
+             return False # Ошибка
+        except Exception as e_gen: # Ловим другие ошибки
+            error_msg = f"Unexpected error appending rows: {e_gen}"
+            debug_logs.append(error_msg)
+            st.error(error_msg)
+            return False # Ошибка
+    else:
+        # debug_logs.append("Info: No new rows to add.") # Опциональный лог
+        st.info("No new scrim records found to add.")
+        return False
 
 # --- aggregate_scrims_data (УБРАНА ОТЛАДКА) ---
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
