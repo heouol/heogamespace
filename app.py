@@ -1622,6 +1622,7 @@ if 'name' not in st.session_state:
 if 'username' not in st.session_state:
     st.session_state.username = None
 
+login_placeholder = st.empty()
 
 # Attempt login only if status is None (initial state)
 if st.session_state.authentication_status is None:
