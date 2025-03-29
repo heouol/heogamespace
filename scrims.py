@@ -53,12 +53,21 @@ def get_champion_icon_html(champion, width=25, height=25):
     if norm: url = f"https://ddragon.leagueoflegends.com/cdn/{patch_version}/img/champion/{norm}.png"; return f'<img src="{url}" width="{width}" height="{height}" alt="{champion}" title="{champion}" style="vertical-align: middle; margin: 1px;">'
     return ""
 def color_win_rate_scrims(value):
-    try: v = float(value);
-    if 0<=v<48: return f'<span style="color:#FF7F7F; font-weight:bold;">{v:.1f}%</span>'
-    elif 48<=v<=52: return f'<span style="color:#FFD700; font-weight:bold;">{v:.1f}%</span>'
-    elif v>52: return f'<span style="color:#90EE90; font-weight:bold;">{v:.1f}%</span>'
-    else: return f'{v}'
-    except (ValueError, TypeError): return f'{v}'
+    try:
+        v = float(value)
+        # --- ИСПРАВЛЕННЫЙ БЛОК ---
+        if 0 <= v < 48:
+            return f'<span style="color:#FF7F7F; font-weight:bold;">{v:.1f}%</span>'
+        elif 48 <= v <= 52:
+            return f'<span style="color:#FFD700; font-weight:bold;">{v:.1f}%</span>'
+        elif v > 52:
+            return f'<span style="color:#90EE90; font-weight:bold;">{v:.1f}%</span>'
+        else:
+            # Handle potential edge cases or NaN if needed
+            return f'{value}' # Return original value if outside defined ranges
+        # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+    except (ValueError, TypeError):
+        return f'{value}'
 
 # --- Google Sheets Setup (Без изменений) ---
 @st.cache_resource
