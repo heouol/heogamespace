@@ -58,17 +58,103 @@ def check_if_scrims_worksheet_exists(spreadsheet, name):
 # --- GRID API Functions (Keep as is) ---
 @st.cache_data(ttl=300)
 def get_all_series(_debug_placeholder):
-    headers={"x-api-key":GRID_API_KEY,"Content-Type":"application/json"}; query="""query($filter:SeriesFilter,$first:Int,$after:Cursor,$orderBy:SeriesOrderBy,$orderDirection:OrderDirection){allSeries(filter:$filter,first:$first,after:$after,orderBy:$orderBy,orderDirection:$orderDirection){totalCount,pageInfo{hasNextPage,endCursor},edges{node{id,startTimeScheduled}}}}"""; start_thresh=(datetime.utcnow()-timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ"); variables={"filter":{"titleId":3,"types":["SCRIM"],"startTimeScheduled":{"gte":start_thresh}},"first":50,"orderBy":"StartTimeScheduled","orderDirection":"DESC"}; nodes,next_pg,cursor,pg_num,max_pg=[],True,None,1,20
-    while next_pg and pg_num<=max_pg:
-        curr_vars=variables.copy();
-        if cursor:curr_vars["after"]=cursor
-        try: resp=requests.post(f"{GRID_BASE_URL}central-data/graphql",headers=headers,json={"query":query,"variables":curr_vars},timeout=20); resp.raise_for_status(); data=resp.json()
-        if "errors" in data:
-            st.error(f"GraphQL Err:{data['errors']}")
-            break
-        s_data=data.get("data",{}).get("allSeries",{}); edges=s_data.get("edges",[]); nodes.extend([s["node"] for s in edges if "node" in s]); info=s_data.get("pageInfo",{}); next_pg=info.get("hasNextPage",False); cursor=info.get("endCursor"); pg_num+=1; time.sleep(0.2)
-        except Exception as e:st.error(f"Err fetch series pg {pg_num}:{e}");return[]
-    return nodes
+    # Use a separate list for internal logging if needed, don't rely on passed list for cache key
+    internal_logs = []
+    headers = {
+        "x-api-key": GRID_API_KEY,
+        "Content-Type": "application/json"
+    }
+    query = """
+    query ($filter: SeriesFilter, $first: Int, $after: Cursor, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
+        allSeries(
+            filter: $filter
+            first: $first
+            after: $after
+            orderBy: $orderBy
+            orderDirection: $orderDirection
+        ) {
+            totalCount
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+            edges {
+                node {
+                    id
+                    startTimeScheduled
+                }
+            }
+        }
+    }
+    """
+    lookback_days = 180
+    start_date_threshold = (datetime.utcnow() - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    variables = {
+        "filter": {
+            "titleId": 3,
+            "types": ["SCRIM"],
+            "startTimeScheduled": {"gte": start_date_threshold}
+        },
+        "first": 50,
+        "orderBy": "StartTimeScheduled",
+        "orderDirection": "DESC"
+    }
+
+    all_series_nodes = []
+    has_next_page = True
+    after_cursor = None
+    page_number = 1
+    max_pages = 20
+
+    while has_next_page and page_number <= max_pages:
+        current_variables = variables.copy()
+        if after_cursor:
+            current_variables["after"] = after_cursor
+
+        try:
+            response = requests.post(
+                f"{GRID_BASE_URL}central-data/graphql",
+                headers=headers,
+                json={"query": query, "variables": current_variables},
+                timeout=20
+            )
+            response.raise_for_status() # Raise HTTP errors
+
+            data = response.json()
+
+            # --- ВОССТАНОВЛЕННЫЙ БЛОК ---
+            if "errors" in data:
+                 internal_logs.append(f"GraphQL Error (Page {page_number}): {data['errors']}")
+                 st.error(f"GraphQL Error: {data['errors']}") # Show error in UI
+                 break # Stop pagination on error
+            # --- КОНЕЦ ВОССТАНОВЛЕННОГО БЛОКА ---
+
+            all_series_data = data.get("data", {}).get("allSeries", {})
+            series_edges = all_series_data.get("edges", [])
+            all_series_nodes.extend([s["node"] for s in series_edges if "node" in s])
+
+            page_info = all_series_data.get("pageInfo", {})
+            has_next_page = page_info.get("hasNextPage", False)
+            after_cursor = page_info.get("endCursor")
+            # internal_logs.append(f"GraphQL Page {page_number}: Fetched {len(series_edges)} series. HasNext: {has_next_page}") # Optional log
+
+            page_number += 1
+            time.sleep(0.2) # Small delay between pages
+
+        except requests.exceptions.RequestException as e:
+            internal_logs.append(f"Network error fetching GraphQL page {page_number}: {e}")
+            st.error(f"Network error fetching series list: {e}")
+            return [] # Return empty on error
+        except Exception as e:
+             internal_logs.append(f"Unexpected error fetching GraphQL page {page_number}: {e}")
+             st.error(f"Unexpected error fetching series list: {e}")
+             return []
+
+    # if page_number > max_pages: st.warning(f"Reached max pages ({max_pages})") # Optional warning
+    # internal_logs.append(f"Total series fetched: {len(all_series_nodes)}")
+    # print("\n".join(internal_logs)) # Optional print for server logs
+    return all_series_nodes
 
 def download_series_data(sid,logs,max_ret=3,delay_init=2):
     hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/series/{sid}"
