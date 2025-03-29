@@ -332,7 +332,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         new_rows.append(new_row); existing_ids.add(m_id); processed += 1
     progress_bar.progress(1.0, text="Updating sheet...")
     summary = [f"\n--- Summary ---", f"Checked:{total}", f"{TEAM_NAME}:{gms_count}", f"Dupes:{skip_dupes}", f"Processed:{processed}", f"New:{len(new_rows)}"]
-     debug_logs.extend(summary) # Используем локальный список debug_logs
+    debug_logs.extend(summary) # Используем локальный список debug_logs
 
     # --- ИСПРАВЛЕННЫЙ БЛОК ---
         # --- ИСПРАВЛЕННЫЙ БЛОК ---
