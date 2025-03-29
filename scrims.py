@@ -11,14 +11,14 @@ from datetime import datetime, timedelta
 import time
 from collections import defaultdict # Import defaultdict
 
-# Настройки (Keep these specific to scrims)
-GRID_API_KEY = os.getenv("GRID_API_KEY", "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63") # Use env var or secrets
+# Настройки
+GRID_API_KEY = os.getenv("GRID_API_KEY", "kGPVB57xOjbFawMFqF18p1SzfoMdzWkwje4HWX63")
 GRID_BASE_URL = "https://api.grid.gg/"
 TEAM_NAME = "Gamespace MC"
-SCRIMS_SHEET_NAME = "Scrims_GMS_Detailed" # Use a specific name for the scrims sheet
-SCRIMS_WORKSHEET_NAME = "Scrims" # Name of the worksheet within the sheet
+SCRIMS_SHEET_NAME = "Scrims_GMS_Detailed"
+SCRIMS_WORKSHEET_NAME = "Scrims"
 
-# --- DDRagon Helper Functions (Needed for icons) ---
+# --- DDRagon Helper Functions ---
 @st.cache_data(ttl=3600)
 def get_latest_patch_version():
     try:
@@ -26,9 +26,6 @@ def get_latest_patch_version():
         response.raise_for_status(); versions = response.json()
         return versions[0] if versions else "14.14.1"
     except Exception: return "14.14.1"
-
-# Get patch version when needed, not at import time
-# PATCH_VERSION = get_latest_patch_version() # REMOVED
 
 @st.cache_data
 def normalize_champion_name_for_ddragon(champ):
@@ -44,36 +41,31 @@ def get_champion_icon_html(champion, width=25, height=25):
         icon_url = f"https://ddragon.leagueoflegends.com/cdn/{patch_version}/img/champion/{normalized_champ}.png"
         return f'<img src="{icon_url}" width="{width}" height="{height}" alt="{champion}" title="{champion}" style="vertical-align: middle; margin: 1px;">'
     return ""
-# --- End of DDRagon Helpers ---
-
 
 # --- Google Sheets Setup ---
 @st.cache_resource
 def setup_google_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    json_creds_str = os.getenv("GOOGLE_SHEETS_CREDS")
-    if not json_creds_str: st.error("GOOGLE_SHEETS_CREDS not found for Scrims."); return None
+    json_creds_str = os.getenv("GOOGLE_SHEETS_CREDS");
+    if not json_creds_str: st.error("GOOGLE_SHEETS_CREDS not found."); return None
     try:
-        creds_dict = json.loads(json_creds_str)
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        creds_dict = json.loads(json_creds_str); creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds); client.list_spreadsheet_files(); return client
-    except Exception as e: st.error(f"GSheets setup error for Scrims: {e}"); return None
+    except Exception as e: st.error(f"GSheets setup error: {e}"); return None
 
 # --- Worksheet Check/Creation ---
 def check_if_scrims_worksheet_exists(spreadsheet, name):
     try: wks = spreadsheet.worksheet(name)
     except gspread.exceptions.WorksheetNotFound:
         try:
-            st.info(f"Worksheet '{name}' creating...")
             wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=26)
             header = ["Date","Match ID","Blue Team","Red Team","Blue Ban 1","Blue Ban 2","Blue Ban 3","Blue Ban 4","Blue Ban 5","Red Ban 1","Red Ban 2","Red Ban 3","Red Ban 4","Red Ban 5","Blue Pick 1","Blue Pick 2","Blue Pick 3","Blue Pick 4","Blue Pick 5","Red Pick 1","Red Pick 2","Red Pick 3","Red Pick 4","Red Pick 5","Duration","Result"]
             wks.append_row(header, value_input_option='USER_ENTERED')
-            st.info(f"Worksheet '{name}' created.")
         except Exception as e: st.error(f"Error creating worksheet '{name}': {e}"); return None
     except Exception as e: st.error(f"Error accessing worksheet '{name}': {e}"); return None
     return wks
 
-# --- GRID API Functions (Keep as previously corrected) ---
+# --- GRID API Functions (Keep as is) ---
 @st.cache_data(ttl=300)
 def get_all_series(_debug_placeholder):
     headers = {"x-api-key": GRID_API_KEY, "Content-Type": "application/json"}
@@ -99,54 +91,48 @@ def download_series_data(series_id, debug_logs, max_retries=3, initial_delay=2):
     headers = {"x-api-key": GRID_API_KEY}; url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, headers=headers, timeout=15); # debug_logs.append(f"S {series_id}: Status {response.status_code}")
+            response = requests.get(url, headers=headers, timeout=15);
             if response.status_code == 200:
                 try: return response.json()
-                except json.JSONDecodeError: debug_logs.append(f"Error: JSON Decode S {series_id}"); return None
-            elif response.status_code == 429: delay = initial_delay * (2 ** attempt); debug_logs.append(f"Warn: 429 S {series_id}. Wait {delay}s"); st.toast(f"Limit wait {delay}s..."); time.sleep(delay); continue
-            elif response.status_code == 404: debug_logs.append(f"Info: S {series_id} 404."); return None
-            else: debug_logs.append(f"Error: S {series_id} Status {response.status_code}"); response.raise_for_status()
+                except json.JSONDecodeError: debug_logs.append(f"Err: JSON S {series_id}"); return None
+            elif response.status_code == 429: delay = initial_delay * (2 ** attempt); debug_logs.append(f"Warn: 429 S {series_id}. Wait {delay}s"); st.toast(f"Wait {delay}s..."); time.sleep(delay); continue
+            elif response.status_code == 404: return None # Don't log 404 as error
+            else: debug_logs.append(f"Err: S {series_id} Status {response.status_code}"); response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            debug_logs.append(f"Error: Network S {series_id} (Att {attempt+1}): {e}")
             if attempt < max_retries - 1: time.sleep(initial_delay * (2 ** attempt))
             else: st.error(f"Network error S {series_id}: {e}"); return None
-    debug_logs.append(f"Error: Failed S {series_id} download."); return None
+    return None
 
 def download_game_data(game_id, debug_logs, max_retries=3, initial_delay=2):
     headers = {"x-api-key": GRID_API_KEY}; url = f"https://api.grid.gg/file-download/end-state/grid/game/{game_id}"
     for attempt in range(max_retries):
         try:
-            response = requests.get(url, headers=headers, timeout=15); # debug_logs.append(f"G {game_id}: Status {response.status_code}")
+            response = requests.get(url, headers=headers, timeout=15);
             if response.status_code == 200:
                  try: return response.json()
-                 except json.JSONDecodeError: debug_logs.append(f"Error: JSON Decode G {game_id}"); return None
-            elif response.status_code == 429: delay = initial_delay * (2 ** attempt); debug_logs.append(f"Warn: 429 G {game_id}. Wait {delay}s"); st.toast(f"Limit wait {delay}s..."); time.sleep(delay); continue
-            elif response.status_code == 404: debug_logs.append(f"Info: G {game_id} 404."); return None
-            else: debug_logs.append(f"Error: G {game_id} Status {response.status_code}"); response.raise_for_status()
+                 except json.JSONDecodeError: debug_logs.append(f"Err: JSON G {game_id}"); return None
+            elif response.status_code == 429: delay = initial_delay * (2 ** attempt); debug_logs.append(f"Warn: 429 G {game_id}. Wait {delay}s"); st.toast(f"Wait {delay}s..."); time.sleep(delay); continue
+            elif response.status_code == 404: return None
+            else: debug_logs.append(f"Err: G {game_id} Status {response.status_code}"); response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            debug_logs.append(f"Error: Network G {game_id} (Att {attempt+1}): {e}")
             if attempt < max_retries - 1: time.sleep(initial_delay * (2 ** attempt))
             else: st.error(f"Network error G {game_id}: {e}"); return None
-    debug_logs.append(f"Error: Failed G {game_id} download."); return None
+    return None
 
 
-# --- update_scrims_data (REVERTED: No strict pick check) ---
+# --- update_scrims_data (Keep reverted version without strict pick check) ---
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
-    if not worksheet: debug_logs.append("Error: Invalid worksheet."); st.error("Invalid Sheet."); return False
-    if not series_list: debug_logs.append("Info: Series list empty."); st.info("No series found."); return False
-    try:
-        existing_data = worksheet.get_all_values(); existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
-    except Exception as e: debug_logs.append(f"Error get existing: {e}"); st.error(f"Read error: {e}"); return False
-
+    if not worksheet: st.error("Invalid Sheet."); return False
+    if not series_list: st.info("No series found."); return False
+    try: existing_data = worksheet.get_all_values(); existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()
+    except Exception as e: st.error(f"Read error: {e}"); return False
     new_rows, gamespace_series_count, skipped_duplicates, processed_count = [], 0, 0, 0
     api_request_delay, total_series_to_process = 1.0, len(series_list)
-    progress_text_template = "Processing {current}/{total} (ID: {series_id})"
-
     for i, series_summary in enumerate(series_list):
         series_id = series_summary.get("id");
         if not series_id: continue
-        progress = (i + 1) / total_series_to_process; progress_text = progress_text_template.format(current=i+1, total=total_series_to_process, series_id=series_id)
-        try: progress_bar.progress(progress, text=progress_text)
+        progress = (i + 1) / total_series_to_process;
+        try: progress_bar.progress(progress, text=f"Processing {i+1}/{total_series_to_process}")
         except Exception: pass
         if i > 0: time.sleep(api_request_delay)
         scrim_data = download_series_data(series_id, debug_logs=debug_logs);
@@ -196,9 +182,6 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                         elif seq in [8, 9, 12, 17, 20]:
                             if rp_idx < 5: red_picks[rp_idx] = champ; rp_idx += 1
                 except (ValueError, TypeError, KeyError): continue
-
-        # !! REMOVED STRICT PICK CHECK !!
-
         duration_formatted = "N/A"
         if isinstance(duration_seconds, (int, float)) and duration_seconds >= 0:
             try: duration_formatted = f"{int(duration_seconds // 60)}:{int(duration_seconds % 60):02d}"
@@ -208,179 +191,115 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         elif t1_won is True: result = "Win" if team_1_name == TEAM_NAME else "Loss"
         elif t0_won is False and t1_won is False and team_0.get("outcome") == "tie": result = "Tie"
         new_row = [date_formatted, match_id, blue_team, red_team, *blue_bans, *red_bans, *blue_picks, *red_picks, duration_formatted, result]
-        if len(new_row) != 26: debug_logs.append(f"Error: Row length {series_id}."); continue
+        if len(new_row) != 26: continue
         new_rows.append(new_row); existing_match_ids.add(match_id); processed_count += 1
-
-    progress_bar.progress(1.0, text="Processing complete. Updating sheet...")
-    summary_log = [f"\n--- Scrims Update Summary ---", f"Total series checked: {total_series_to_process}", f"Series involving {TEAM_NAME}: {gamespace_series_count}", f"Skipped duplicate Match IDs: {skipped_duplicates}", f"Successfully processed: {processed_count}", f"New rows to add: {len(new_rows)}" ] # Removed skip count
+    progress_bar.progress(1.0, text="Updating sheet...")
+    summary_log = [f"\n--- Summary ---", f"Checked: {total_series_to_process}", f"{TEAM_NAME}: {gamespace_series_count}", f"Dupes: {skipped_duplicates}", f"Processed: {processed_count}", f"New: {len(new_rows)}" ]
     debug_logs.extend(summary_log)
     if new_rows:
         try:
-            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED');
-            debug_logs.append(f"Success: Appended {len(new_rows)} rows."); st.success(f"Added {len(new_rows)} new scrims.")
-            aggregate_scrims_data.clear() # Clear cache after update
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED'); st.success(f"Added {len(new_rows)} scrims.")
+            # aggregate_scrims_data.clear() # Clear cache only if caching is re-enabled later
             return True
-        except Exception as e: debug_logs.append(f"Error append: {str(e)}"); st.error(f"Error append: {str(e)}"); return False
-    else: debug_logs.append("Info: No new rows."); st.info("No new scrims found."); return False
+        except Exception as e: st.error(f"Append error: {str(e)}"); return False
+    else: st.info("No new scrims."); return False
 
-
-# --- aggregate_scrims_data (REVERTED: Also creates history for display) ---
-@st.cache_data(ttl=600)
+# --- aggregate_scrims_data (REVERTED: No Caching + Creates History DF) ---
+# !! REMOVED @st.cache_data decorator !!
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
-    """Aggregates side win rates AND prepares match history list for display."""
-    if not worksheet: return {}, {}, pd.DataFrame() # Return empty DF for history
-
-    blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
-    red_side_stats = {"wins": 0, "losses": 0, "total": 0}
-    match_history_rows = [] # Store rows for DataFrame
-    expected_columns = 26
-
-    # Time Filtering Setup
-    now = datetime.utcnow(); time_threshold = None
+    if not worksheet: return {}, {}, pd.DataFrame()
+    blue_stats, red_stats, history_rows, expected_cols = {"wins": 0,"losses": 0,"total": 0}, {"wins": 0,"losses": 0,"total": 0}, [], 26
+    now, time_threshold = datetime.utcnow(), None
     if time_filter == "1 Week": time_threshold = now - timedelta(weeks=1)
     elif time_filter == "2 Weeks": time_threshold = now - timedelta(weeks=2)
-    elif time_filter == "3 Weeks": time_threshold = now - timedelta(weeks=3)
-    elif time_filter == "4 Weeks": time_threshold = now - timedelta(weeks=4)
+    # ... (add other time filters if needed)
     elif time_filter == "2 Months": time_threshold = now - timedelta(days=60)
-
     try: data = worksheet.get_all_values()
-    except Exception as e: st.error(f"Error reading sheet for agg: {e}"); return blue_side_stats, red_side_stats, pd.DataFrame()
-    if len(data) <= 1: return blue_side_stats, red_side_stats, pd.DataFrame()
-
+    except Exception as e: st.error(f"Read error agg: {e}"); return blue_stats, red_stats, pd.DataFrame()
+    if len(data) <= 1: return blue_stats, red_stats, pd.DataFrame()
     header = data[0]
-    try: # Define indices based on the exact header names in the sheet
-        idx = {name: header.index(name) for name in ["Date", "Match ID", "Blue Team", "Red Team", "Duration", "Result", "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5", "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5", "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5", "Red Pick 1", "Red Pick 2", "Red Pick 3", "Red Pick 4", "Red Pick 5"]}
-    except ValueError as e: st.error(f"Missing header for agg: {e}."); return blue_side_stats, red_side_stats, pd.DataFrame()
-
+    try: idx = {name: header.index(name) for name in ["Date", "Match ID", "Blue Team", "Red Team", "Duration", "Result", "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5", "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5", "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5", "Red Pick 1", "Red Pick 2", "Red Pick 3", "Red Pick 4", "Red Pick 5"]}
+    except ValueError as e: st.error(f"Header error agg: {e}."); return blue_stats, red_stats, pd.DataFrame()
     for row in data[1:]:
-        if len(row) < expected_columns: continue
+        if len(row) < expected_cols: continue
         try:
             date_str = row[idx["Date"]]
-            # Apply time filter
             if time_threshold and date_str != "N/A":
                 try:
                     if datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S") < time_threshold: continue
-                except ValueError: continue # Skip unparseable dates when filtering
-
+                except ValueError: continue
             blue_team, red_team, result = row[idx["Blue Team"]], row[idx["Red Team"]], row[idx["Result"]]
-
-            # Calculate side stats (only for TEAM_NAME)
-            is_our_game, is_blue = False, False
-            if blue_team == TEAM_NAME: is_our_game, is_blue = True, True
-            elif red_team == TEAM_NAME: is_our_game, is_blue = True, False
-            if is_our_game:
+            is_our, is_blue = False, False
+            if blue_team == TEAM_NAME: is_our, is_blue = True, True
+            elif red_team == TEAM_NAME: is_our, is_blue = True, False
+            if is_our:
                 win = (result == "Win")
                 if is_blue:
-                    blue_side_stats["total"] += 1
-                    if win: blue_side_stats["wins"] += 1
-                    elif result == "Loss": blue_side_stats["losses"] += 1
+                    blue_stats["total"] += 1;
+                    if win: blue_stats["wins"] += 1; elif result == "Loss": blue_stats["losses"] += 1
                 else:
-                    red_side_stats["total"] += 1
-                    if win: red_side_stats["wins"] += 1
-                    elif result == "Loss": red_side_stats["losses"] += 1
+                    red_stats["total"] += 1;
+                    if win: red_stats["wins"] += 1; elif result == "Loss": red_stats["losses"] += 1
+            bb_html = " ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if row[idx[f"Blue Ban {i}"]] != "N/A")
+            rb_html = " ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if row[idx[f"Red Ban {i}"]] != "N/A")
+            bp_html = " ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if row[idx[f"Blue Pick {i}"]] != "N/A")
+            rp_html = " ".join(get_champion_icon_html(row[idx[f"Red Pick {i}"]]) for i in range(1, 6) if row[idx[f"Red Pick {i}"]] != "N/A")
+            history_rows.append({"Date": date_str, "Blue Team": blue_team, "B Bans": bb_html, "B Picks": bp_html, "Result": result, "Duration": row[idx["Duration"]], "R Picks": rp_html, "R Bans": rb_html, "Red Team": red_team, "Match ID": row[idx["Match ID"]]})
+        except Exception: continue
+    df_history = pd.DataFrame(history_rows)
+    try: df_history['Date_DT'] = pd.to_datetime(df_history['Date'], errors='coerce'); df_history = df_history.sort_values(by='Date_DT', ascending=False).drop(columns=['Date_DT'])
+    except Exception: pass
+    return blue_stats, red_stats, df_history
 
-            # Prepare row for history display (always add, filtering is done before loop)
-            # Generate icon HTML here
-            blue_bans_html = " ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if row[idx[f"Blue Ban {i}"]] != "N/A")
-            red_bans_html = " ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if row[idx[f"Red Ban {i}"]] != "N/A")
-            blue_picks_html = " ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if row[idx[f"Blue Pick {i}"]] != "N/A")
-            red_picks_html = " ".join(get_champion_icon_html(row[idx[f"Red Pick {i}"]]) for i in range(1, 6) if row[idx[f"Red Pick {i}"]] != "N/A")
-
-            match_history_rows.append({
-                "Date": date_str,
-                "Blue Team": blue_team,
-                "B Bans": blue_bans_html,
-                "B Picks": blue_picks_html,
-                "Result": result,
-                "Duration": row[idx["Duration"]],
-                "R Picks": red_picks_html,
-                "R Bans": red_bans_html,
-                "Red Team": red_team,
-                "Match ID": row[idx["Match ID"]],
-            })
-        except Exception as e: continue # Skip row on error
-
-    df_history = pd.DataFrame(match_history_rows)
-    # Sort history (most recent first)
-    try:
-        df_history['Date_DT'] = pd.to_datetime(df_history['Date'], errors='coerce')
-        df_history = df_history.sort_values(by='Date_DT', ascending=False).drop(columns=['Date_DT'])
-    except Exception: pass # Keep original order if date conversion fails
-
-    return blue_side_stats, red_side_stats, df_history # Return DataFrame
-
-
-# --- scrims_page (REVERTED: No tabs, uses reverted aggregate func) ---
+# --- scrims_page (Keep reverted version) ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
     client = setup_google_sheets();
-    if not client: st.error("Failed GSheets client init."); return
+    if not client: st.error("GSheets client failed."); return
     try: spreadsheet = client.open(SCRIMS_SHEET_NAME)
-    except Exception as e: st.error(f"Error accessing sheet '{SCRIMS_SHEET_NAME}': {e}"); return
+    except Exception as e: st.error(f"Sheet access error: {e}"); return
     wks = check_if_scrims_worksheet_exists(spreadsheet, SCRIMS_WORKSHEET_NAME);
-    if not wks: st.error(f"Failed worksheet access '{SCRIMS_WORKSHEET_NAME}'."); return
+    if not wks: st.error(f"Worksheet access error."); return
 
-    with st.expander("Update Scrim Data from API", expanded=False):
-        # (Update Button Logic - Keep as is)
+    with st.expander("Update Scrim Data", expanded=False):
         debug_logs_scrims = [];
         if 'scrims_debug_logs' not in st.session_state: st.session_state.scrims_debug_logs = []
-        if st.button("Download & Update Scrims Data from GRID API", key="update_scrims_btn"):
+        if st.button("Download & Update from GRID API", key="update_scrims_btn"):
             st.session_state.scrims_debug_logs = []; debug_logs_scrims = st.session_state.scrims_debug_logs
-            with st.spinner("Fetching series list..."): series_list = get_all_series(debug_logs_scrims)
+            with st.spinner("Fetching series..."): series_list = get_all_series(debug_logs_scrims)
             if series_list:
-                st.info(f"Found {len(series_list)} series. Processing...")
-                progress_bar_placeholder = st.empty(); progress_bar = progress_bar_placeholder.progress(0, text="Starting processing...")
+                st.info(f"Processing {len(series_list)} series...")
+                progress_bar_placeholder = st.empty(); progress_bar = progress_bar_placeholder.progress(0, text="Starting...")
                 try: data_added = update_scrims_data(wks, series_list, debug_logs_scrims, progress_bar)
-                except Exception as e: st.error(f"Update error: {e}"); debug_logs_scrims.append(f"FATAL ERROR: {e}")
+                except Exception as e: st.error(f"Update error: {e}")
                 finally: progress_bar_placeholder.empty()
-            else: st.warning("No scrim series found.")
-        if st.session_state.scrims_debug_logs: st.code("\n".join(st.session_state.scrims_debug_logs), language=None)
+            else: st.warning("No series found.")
+        # if st.session_state.scrims_debug_logs: st.code("\n".join(st.session_state.scrims_debug_logs), language=None) # Keep logs minimal
 
     st.divider()
-    st.subheader("Scrim Performance Statistics")
-    time_filter = st.selectbox("Filter Stats by Time Range:", ["All Time", "1 Week", "2 Weeks", "3 Weeks", "4 Weeks", "2 Months"], key="scrims_time_filter")
+    st.subheader("Scrim Performance")
+    time_filter = st.selectbox("Filter by Time:", ["All Time", "1 Week", "2 Weeks", "3 Weeks", "4 Weeks", "2 Months"], key="scrims_time_filter")
 
     # --- Call reverted aggregate function ---
-    # It now returns the history DataFrame directly
-    blue_stats, red_stats, df_history = aggregate_scrims_data(wks, time_filter)
+    blue_stats, red_stats, df_history = aggregate_scrims_data(wks, time_filter) # Removed caching here
 
     # --- Display Summary Win Rates ---
     try:
-        # These stats are now filtered by time_filter by the aggregate function
-        total_games_filtered = blue_stats["total"] + red_stats["total"]
-        total_wins_filtered = blue_stats["wins"] + red_stats["wins"]
-        total_losses_filtered = blue_stats["losses"] + red_stats["losses"]
-
+        total_games_f = blue_stats["total"] + red_stats["total"]; total_wins_f = blue_stats["wins"] + red_stats["wins"]; total_losses_f = blue_stats["losses"] + red_stats["losses"]
         st.markdown(f"**Performance ({time_filter})**")
         col_ov, col_b, col_r = st.columns(3)
-        with col_ov:
-             overall_wr = (total_wins_filtered / total_games_filtered * 100) if total_games_filtered > 0 else 0
-             st.metric("Total Games", total_games_filtered)
-             st.metric("Overall WR", f"{overall_wr:.1f}%", f"{total_wins_filtered}W-{total_losses_filtered}L")
-        with col_b:
-             blue_wr = (blue_stats["wins"] / blue_stats["total"] * 100) if blue_stats["total"] > 0 else 0
-             st.metric("Blue Side WR", f"{blue_wr:.1f}%", f"{blue_stats['wins']}W-{blue_stats['losses']}L ({blue_stats['total']} G)")
-        with col_r:
-             red_wr = (red_stats["wins"] / red_stats["total"] * 100) if red_stats["total"] > 0 else 0
-             st.metric("Red Side WR", f"{red_wr:.1f}%", f"{red_stats['wins']}W-{red_stats['losses']}L ({red_stats['total']} G)")
-    except Exception as e: st.error(f"Error displaying summary stats: {e}")
+        with col_ov: overall_wr = (total_wins_f / total_games_f * 100) if total_games_f > 0 else 0; st.metric("Total Games", total_games_f); st.metric("Overall WR", f"{overall_wr:.1f}%", f"{total_wins_f}W-{total_losses_f}L")
+        with col_b: blue_wr = (blue_stats["wins"] / blue_stats["total"] * 100) if blue_stats["total"] > 0 else 0; st.metric("Blue WR", f"{blue_wr:.1f}%", f"{blue_stats['wins']}W-{blue_stats['losses']}L ({blue_stats['total']} G)")
+        with col_r: red_wr = (red_stats["wins"] / red_stats["total"] * 100) if red_stats["total"] > 0 else 0; st.metric("Red WR", f"{red_wr:.1f}%", f"{red_stats['wins']}W-{red_stats['losses']}L ({red_stats['total']} G)")
+    except Exception as e: st.error(f"Error display summary: {e}")
 
     st.divider()
-
-    # --- Display Match History Table (No Tabs) ---
+    # --- Display Match History Table ---
     st.subheader(f"Match History ({time_filter})")
     if not df_history.empty:
-        # Display DataFrame with icons rendered as HTML
-        st.markdown(
-            df_history.to_html(escape=False, index=False, classes='compact-table history-table', justify='center'),
-            unsafe_allow_html=True
-        )
-    else:
-        st.info(f"No match history available for the selected time range ({time_filter}).")
-
+        st.markdown(df_history.to_html(escape=False, index=False, classes='compact-table history-table', justify='center'), unsafe_allow_html=True)
+    else: st.info(f"No match history for {time_filter}.")
 
 # --- Keep __main__ block as is ---
-if __name__ == "__main__":
-    st.warning("This page is intended to be run from the main app.py")
-    pass
+if __name__ == "__main__": pass
 # --- END OF FILE scrims.py ---
