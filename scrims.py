@@ -232,14 +232,23 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
             is_our, is_blue = False, False
             if blue_team == TEAM_NAME: is_our, is_blue = True, True
             elif red_team == TEAM_NAME: is_our, is_blue = True, False
-            if is_our:
+            if is_our_game:
                 win = (result == "Win")
                 if is_blue:
-                    blue_stats["total"] += 1;
-                    if win: blue_stats["wins"] += 1; elif result == "Loss": blue_stats["losses"] += 1
-                else:
-                    red_stats["total"] += 1;
-                    if win: red_stats["wins"] += 1; elif result == "Loss": red_stats["losses"] += 1
+                    blue_side_stats["total"] += 1
+                    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ (Разбиваем на строки) ---
+                    if win:
+                        blue_side_stats["wins"] += 1
+                    elif result == "Loss":
+                        blue_side_stats["losses"] += 1
+                    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+                else: # Red side
+                    red_side_stats["total"] += 1
+                    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ (Разбиваем на строки) ---
+                    if win:
+                        red_side_stats["wins"] += 1
+                    elif result == "Loss":
+                        red_side_stats["losses"] += 1
             bb_html = " ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if row[idx[f"Blue Ban {i}"]] != "N/A")
             rb_html = " ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if row[idx[f"Red Ban {i}"]] != "N/A")
             bp_html = " ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if row[idx[f"Blue Pick {i}"]] != "N/A")
