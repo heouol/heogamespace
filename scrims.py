@@ -335,6 +335,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
      debug_logs.extend(summary) # Используем локальный список debug_logs
 
     # --- ИСПРАВЛЕННЫЙ БЛОК ---
+        # --- ИСПРАВЛЕННЫЙ БЛОК ---
     if new_rows:
         try:
             worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
@@ -344,14 +345,14 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
             return True # Успешное добавление
         except gspread.exceptions.APIError as e_api: # Ловим специфичные ошибки gspread
              error_msg = f"GSpread API Error appending rows: {e_api}"
-             debug_logs.append(error_msg)
-             st.error(error_msg)
-             return False # Ошибка
+             debug_logs.append(error_msg) # <-- Правильный отступ
+             st.error(error_msg)          # <-- Правильный отступ
+             return False # Ошибка       # <-- Правильный отступ
         except Exception as e_gen: # Ловим другие ошибки
             error_msg = f"Unexpected error appending rows: {e_gen}"
-            debug_logs.append(error_msg)
-            st.error(error_msg)
-            return False # Ошибка
+            debug_logs.append(error_msg) # <-- Правильный отступ
+            st.error(error_msg)          # <-- Правильный отступ
+            return False # Ошибка       # <-- Правильный отступ
     else:
         # debug_logs.append("Info: No new rows to add.") # Опциональный лог
         st.info("No new scrim records found to add.")
