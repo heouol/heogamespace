@@ -12,7 +12,8 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import json
 import os
-import scrims # Импорт функции scrims_page из файла scrims.py
+import scrims
+from scrims import scrims_page# Импорт функции scrims_page из файла scrims.py
 
 # Set page config at the start (must be the first Streamlit command)
 st.set_page_config(layout="wide", page_title="HLL Analytics")
