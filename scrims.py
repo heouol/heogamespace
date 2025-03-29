@@ -63,7 +63,9 @@ def get_all_series(_debug_placeholder):
         curr_vars=variables.copy();
         if cursor:curr_vars["after"]=cursor
         try: resp=requests.post(f"{GRID_BASE_URL}central-data/graphql",headers=headers,json={"query":query,"variables":curr_vars},timeout=20); resp.raise_for_status(); data=resp.json()
-        if "errors" in data:st.error(f"GraphQL Err:{data['errors']}");break
+        if "errors" in data:
+            st.error(f"GraphQL Err:{data['errors']}")
+            break
         s_data=data.get("data",{}).get("allSeries",{}); edges=s_data.get("edges",[]); nodes.extend([s["node"] for s in edges if "node" in s]); info=s_data.get("pageInfo",{}); next_pg=info.get("hasNextPage",False); cursor=info.get("endCursor"); pg_num+=1; time.sleep(0.2)
         except Exception as e:st.error(f"Err fetch series pg {pg_num}:{e}");return[]
     return nodes
