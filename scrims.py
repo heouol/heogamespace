@@ -299,7 +299,17 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                         elif seq in [8,9,12,17,20]: rp += 1; r_picks[rp-1] = champ if rp <= 5 else champ
                 except Exception: continue
         duration_f = "N/A";
-        if isinstance(duration_s,(int,float)) and duration_s>=0: try: duration_f=f"{int(duration_s//60)}:{int(duration_s%60):02d}" ;except Exception: pass
+        if isinstance(duration_s, (int, float)) and duration_s >= 0:
+            try:
+                minutes = int(duration_s // 60)
+                seconds = int(duration_s % 60)
+                duration_f = f"{minutes}:{seconds:02d}" # Формат MM:SS
+            except Exception as e:
+                # Можно добавить логгирование ошибки форматирования, если нужно
+                # debug_logs.append(f"Warn: Formatting duration {duration_s} failed: {e}")
+                pass # Оставляем duration_f как "N/A" при ошибке форматирования
+        # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+
         res = "N/A"; t0w, t1w = t0.get("won"), t1.get("won")
         if t0w is True: res="Win" if t0_n==TEAM_NAME else "Loss"; elif t1w is True: res="Win" if t1_n==TEAM_NAME else "Loss"; elif t0w is False and t1w is False and t0.get("outcome")=="tie": res="Tie"
         new_row = [date_f, m_id, b_team, r_team, *b_bans, *r_bans, *b_picks, *r_picks, duration_f, res]
