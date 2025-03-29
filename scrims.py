@@ -167,7 +167,7 @@ def download_game_data(game_id, max_retries=3, initial_delay=5, debug_logs=None)
             if response.status_code == 200:
                 return response.json()
             elif response.status_code == 429:
-               (delay = initial_delay * (2 ** attempt)
+                delay = initial_delay * (2 ** attempt)
                 debug_logs.append(f"Ошибка 429 для Game {game_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
                 st.write(f"Ошибка 429 для Game {game_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
                 time.sleep(delay)
