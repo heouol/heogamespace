@@ -211,7 +211,11 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         
         # Баны и пики
         game_data = scrim_data.get("object", {}).get("games", [{}])[0]
+        
+        # Отладка: проверяем, что содержится в draftActions
         draft_actions = game_data.get("draftActions", [])
+        debug_logs.append(f"Series {series_id} - draftActions: {json.dumps(draft_actions, indent=2)}")
+        
         blue_bans = ["N/A"] * 5
         red_bans = ["N/A"] * 5
         blue_picks = ["N/A"] * 5
@@ -255,6 +259,9 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         
         # Длительность
         clock = game_data.get("clock", {})
+        # Отладка: проверяем, что содержится в clock
+        debug_logs.append(f"Series {series_id} - clock: {json.dumps(clock, indent=2)}")
+        
         duration_seconds = clock.get("currentSeconds", "N/A")
         if isinstance(duration_seconds, (int, float)):
             duration = f"{int(duration_seconds // 60)}:{int(duration_seconds % 60):02d}"  # Переводим секунды в формат MM:SS
