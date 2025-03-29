@@ -207,137 +207,58 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
 # --- aggregate_scrims_data (REVERTED: No Caching + Creates History DF) ---
 # !! REMOVED @st.cache_data decorator !!
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
-    if not worksheet:
-        st.error("[AGG_DEBUG] Invalid worksheet provided.")
-        return {}, {}, pd.DataFrame()
-
-    st.info(f"[AGG_DEBUG] Starting aggregation for filter: {time_filter}") # Debug Start
-
-    blue_stats, red_stats, history_rows, expected_cols = {"wins":0,"losses":0,"total":0}, {"wins":0,"losses":0,"total":0}, [], 26
+    if not worksheet: return {}, {}, pd.DataFrame()
+    blue_stats, red_stats, history_rows, expected_cols = {"wins": 0,"losses": 0,"total": 0}, {"wins": 0,"losses": 0,"total": 0}, [], 26
     now, time_threshold = datetime.utcnow(), None
     if time_filter == "1 Week": time_threshold = now - timedelta(weeks=1)
     elif time_filter == "2 Weeks": time_threshold = now - timedelta(weeks=2)
-    elif time_filter == "3 Weeks": time_threshold = now - timedelta(weeks=3)
-    elif time_filter == "4 Weeks": time_threshold = now - timedelta(weeks=4)
+    # ... (add other time filters if needed)
     elif time_filter == "2 Months": time_threshold = now - timedelta(days=60)
-
-    try:
-        data = worksheet.get_all_values()
-        st.info(f"[AGG_DEBUG] Read {len(data)} rows from worksheet.") # Debug Row Count
-    except Exception as e:
-        st.error(f"[AGG_DEBUG] Read error agg: {e}")
-        return blue_stats, red_stats, pd.DataFrame()
-
-    if len(data) <= 1:
-        st.warning("[AGG_DEBUG] Worksheet is empty or contains only header.")
-        return blue_stats, red_stats, pd.DataFrame()
-
+    try: data = worksheet.get_all_values()
+    except Exception as e: st.error(f"Read error agg: {e}"); return blue_stats, red_stats, pd.DataFrame()
+    if len(data) <= 1: return blue_stats, red_stats, pd.DataFrame()
     header = data[0]
-    st.info(f"[AGG_DEBUG] Header found: {header}") # Debug Header
-
-    try:
-        # Define required columns for minimal functionality
-        required_cols = ["Date", "Match ID", "Blue Team", "Red Team", "Duration", "Result"]
-        # Define columns needed for icons
-        icon_cols = [f"{side} {act} {i}" for side in ["Blue", "Red"] for act in ["Ban", "Pick"] for i in range(1, 6)]
-        all_expected_cols = required_cols + icon_cols[0:10] + icon_cols[10:20] # Ensure all 26 are checked if needed by indices below
-
-        # Get indices, raise error if any required column is missing
-        idx = {name: header.index(name) for name in all_expected_cols}
-        st.success("[AGG_DEBUG] All required header columns found.") # Debug Header Success
-    except ValueError as e:
-        st.error(f"[AGG_DEBUG] Header error agg: Column not found - {e}.")
-        return blue_stats, red_stats, pd.DataFrame()
-
-    processed_rows = 0
-    skipped_incomplete = 0
-    skipped_filtered = 0
-    skipped_other_error = 0
-
-    for i, row in enumerate(data[1:], start=2): # Start counting from row 2
-        if len(row) < expected_cols:
-            skipped_incomplete += 1
-            continue # Skip incomplete rows
+    try: idx = {name: header.index(name) for name in ["Date", "Match ID", "Blue Team", "Red Team", "Duration", "Result", "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5", "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5", "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5", "Red Pick 1", "Red Pick 2", "Red Pick 3", "Red Pick 4", "Red Pick 5"]}
+    except ValueError as e: st.error(f"Header error agg: {e}."); return blue_stats, red_stats, pd.DataFrame()
+    for row in data[1:]:
+        if len(row) < expected_cols: continue
         try:
             date_str = row[idx["Date"]]
-            # Apply time filter
-            is_filtered_out = False
             if time_threshold and date_str != "N/A":
                 try:
-                    match_date = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                    if match_date < time_threshold:
-                        is_filtered_out = True
-                        skipped_filtered += 1
-                        continue # Skip filtered rows
-                except ValueError:
-                    # Treat unparseable dates as potentially included unless strict filtering is needed
-                    pass # Or: is_filtered_out = True; skipped_filtered += 1; continue
-
-            # If not filtered out by time, proceed
+                    if datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S") < time_threshold: continue
+                except ValueError: continue
             blue_team, red_team, result = row[idx["Blue Team"]], row[idx["Red Team"]], row[idx["Result"]]
-
-            # Calculate side stats (only for TEAM_NAME)
             is_our, is_blue = False, False
             if blue_team == TEAM_NAME: is_our, is_blue = True, True
             elif red_team == TEAM_NAME: is_our, is_blue = True, False
-
-            if is_our:
+            if is_our_game:
                 win = (result == "Win")
                 if is_blue:
-                    blue_stats["total"]+=1
-                    if win: blue_stats["wins"]+=1
-                    elif result=="Loss": blue_stats["losses"]+=1
-                else:
-                    red_stats["total"]+=1
-                    if win: red_stats["wins"]+=1
-                    elif result=="Loss": red_stats["losses"]+=1
-
-            # Prepare row for history display (always add if not filtered by time)
-            bb_html=" ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if idx.get(f"Blue Ban {i}") is not None and row[idx[f"Blue Ban {i}"]] != "N/A")
-            rb_html=" ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if idx.get(f"Red Ban {i}") is not None and row[idx[f"Red Ban {i}"]] != "N/A")
-            bp_html=" ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if idx.get(f"Blue Pick {i}") is not None and row[idx[f"Blue Pick {i}"]] != "N/A")
-            rp_html=" ".join(get_champion_icon_html(row[idx[f"Red Pick {i}"]]) for i in range(1, 6) if idx.get(f"Red Pick {i}") is not None and row[idx[f"Red Pick {i}"]] != "N/A")
-
-            history_rows.append({
-                "Date":date_str,
-                "Blue Team":blue_team,
-                "B Bans":bb_html,
-                "B Picks":bp_html,
-                "Result":result,
-                "Duration":row[idx["Duration"]],
-                "R Picks":rp_html,
-                "R Bans":rb_html,
-                "Red Team":red_team,
-                "Match ID":row[idx["Match ID"]]
-            })
-            processed_rows += 1
-
-        except IndexError as e_idx:
-            st.warning(f"[AGG_DEBUG] IndexError on row {i}: {e_idx}. Row data (partial): {row[:5]}...")
-            skipped_other_error += 1
-            continue
-        except Exception as e_proc:
-            st.warning(f"[AGG_DEBUG] Error processing row {i}: {e_proc}. Row data (partial): {row[:5]}...")
-            skipped_other_error += 1
-            continue
-
-    st.info(f"[AGG_DEBUG] Processing Summary: Total Data Rows={len(data)-1}, Processed for History={processed_rows}, Skipped (Incomplete Col)={skipped_incomplete}, Skipped (Time Filter)={skipped_filtered}, Skipped (Other Error)={skipped_other_error}")
-
+                    blue_side_stats["total"] += 1
+                    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ (Разбиваем на строки) ---
+                    if win:
+                        blue_side_stats["wins"] += 1
+                    elif result == "Loss":
+                        blue_side_stats["losses"] += 1
+                    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+                else: # Red side
+                    red_side_stats["total"] += 1
+                    # --- ИСПРАВЛЕНИЕ ЗДЕСЬ (Разбиваем на строки) ---
+                    if win:
+                        red_side_stats["wins"] += 1
+                    elif result == "Loss":
+                        red_side_stats["losses"] += 1
+            bb_html = " ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if row[idx[f"Blue Ban {i}"]] != "N/A")
+            rb_html = " ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if row[idx[f"Red Ban {i}"]] != "N/A")
+            bp_html = " ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if row[idx[f"Blue Pick {i}"]] != "N/A")
+            rp_html = " ".join(get_champion_icon_html(row[idx[f"Red Pick {i}"]]) for i in range(1, 6) if row[idx[f"Red Pick {i}"]] != "N/A")
+            history_rows.append({"Date": date_str, "Blue Team": blue_team, "B Bans": bb_html, "B Picks": bp_html, "Result": result, "Duration": row[idx["Duration"]], "R Picks": rp_html, "R Bans": rb_html, "Red Team": red_team, "Match ID": row[idx["Match ID"]]})
+        except Exception: continue
     df_history = pd.DataFrame(history_rows)
-    # Sort history (most recent first)
-    try:
-        if not df_history.empty and 'Date' in df_history.columns:
-            df_history['Date_DT'] = pd.to_datetime(df_history['Date'], errors='coerce')
-            # Handle NaT values if any before sorting
-            df_history_sorted = df_history.sort_values(by='Date_DT', ascending=False, na_position='last').drop(columns=['Date_DT'])
-            st.info(f"[AGG_DEBUG] Successfully created and sorted DataFrame with {len(df_history_sorted)} rows.") # Debug DF creation
-            return blue_stats, red_stats, df_history_sorted
-        else:
-             st.warning("[AGG_DEBUG] History DataFrame is empty or Date column missing after processing.")
-             return blue_stats, red_stats, df_history # Return potentially unsorted empty/partial DF
-    except Exception as e_sort:
-        st.error(f"[AGG_DEBUG] Error during DataFrame sorting: {e_sort}")
-        return blue_stats, red_stats, df_history
+    try: df_history['Date_DT'] = pd.to_datetime(df_history['Date'], errors='coerce'); df_history = df_history.sort_values(by='Date_DT', ascending=False).drop(columns=['Date_DT'])
+    except Exception: pass
+    return blue_stats, red_stats, df_history
 
 # --- scrims_page (Keep reverted version) ---
 def scrims_page():
