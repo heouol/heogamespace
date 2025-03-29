@@ -100,6 +100,7 @@ def get_all_series(debug_logs):
             if response.status_code == 200:
                 data = response.json()
                 debug_logs.append(f"GraphQL Response (Page {page_number}): {json.dumps(data, indent=2)}")
+                st.write(f"GraphQL Response (Page {page_number}): {json.dumps(data, indent=2)}")  # Реальное время
                 all_series_data = data.get("data", {}).get("allSeries", {})
                 series = all_series_data.get("edges", [])
                 all_series.extend([s["node"] for s in series])
@@ -111,12 +112,15 @@ def get_all_series(debug_logs):
                 page_number += 1
             else:
                 debug_logs.append(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
+                st.write(f"Ошибка GraphQL API: {response.status_code} - {response.text}")
                 return []
         except requests.exceptions.RequestException as e:
             debug_logs.append(f"Ошибка подключения к GraphQL API: {str(e)}")
+            st.write(f"Ошибка подключения к GraphQL API: {str(e)}")
             return []
 
     debug_logs.append(f"Всего серий получено: {len(all_series)}")
+    st.write(f"Всего серий получено: {len(all_series)}")
     return all_series
 
 # Функция для загрузки данных серии (GRID-формат) с обработкой 429 и 404
@@ -132,25 +136,31 @@ def download_series_data(series_id, max_retries=3, initial_delay=5, debug_logs=N
             elif response.status_code == 429:  # Too Many Requests
                 delay = initial_delay * (2 ** attempt)  # Экспоненциальная задержка
                 debug_logs.append(f"Ошибка 429 для Series {series_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
+                st.write(f"Ошибка 429 для Series {series_id}: слишком много запросов. Ждём {delay} секунд перед повторной попыткой...")
                 time.sleep(delay)
                 continue
             elif response.status_code == 404:  # Not Found
                 debug_logs.append(f"Серия {series_id} не найдена (404). Пропускаем.")
+                st.write(f"Серия {series_id} не найдена (404). Пропускаем.")
                 return None
             else:
                 debug_logs.append(f"Ошибка API для Series {series_id}: {response.status_code} - {response.text}")
+                st.write(f"Ошибка API для Series {series_id}: {response.status_code} - {response.text}")
                 return None
         except requests.exceptions.RequestException as e:
             debug_logs.append(f"Ошибка подключения к GRID API для Series {series_id}: {str(e)}")
+            st.write(f"Ошибка подключения к GRID API для Series {series_id}: {str(e)}")
             return None
     
     debug_logs.append(f"Не удалось загрузить данные для Series {series_id} после {max_retries} попыток.")
+    st.write(f"Не удалось загрузить данные для Series {series_id} после {max_retries} попыток.")
     return None
 
 # Функция для обновления данных в Google Sheets
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     if not series_list:
         debug_logs.append("Список серий пуст. Нечего обновлять.")
+        st.write("Список серий пуст. Нечего обновлять.")
         return False
     
     existing_data = worksheet.get_all_values()
@@ -178,6 +188,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         teams = scrim_data.get("teams", None)
         if not teams or len(teams) < 2:
             debug_logs.append(f"Не удалось найти команды для Series {series_id}. Пропускаем. Данные: {scrim_data}")
+            st.write(f"Не удалось найти команды для Series {series_id}. Пропускаем.")
             continue
         
         team_0_name = teams[0].get("name", "Unknown")
@@ -187,10 +198,12 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         
         gamespace_series_count += 1  # Увеличиваем счётчик
         debug_logs.append(f"Найдена серия для Gamespace MC (Series {series_id}): {team_0_name} vs {team_1_name}")
+        st.write(f"Найдена серия для Gamespace MC (Series {series_id}): {team_0_name} vs {team_1_name}")
         
         match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id)))
         if match_id in existing_match_ids:
             debug_logs.append(f"Серия {series_id} уже существует в таблице (Match ID: {match_id}). Пропускаем.")
+            st.write(f"Серия {series_id} уже существует в таблице (Match ID: {match_id}). Пропускаем.")
             skipped_duplicates += 1
             continue
         
@@ -214,9 +227,11 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         
         # Отладка: выводим всю структуру game_data
         debug_logs.append(f"Series {series_id} - game_data: {json.dumps(game_data, indent=2)}")
+        st.write(f"Series {series_id} - game_data: {json.dumps(game_data, indent=2)}")
         
         draft_actions = game_data.get("draftActions", [])
         debug_logs.append(f"Series {series_id} - draftActions: {json.dumps(draft_actions, indent=2)}")
+        st.write(f"Series {series_id} - draftActions: {json.dumps(draft_actions, indent=2)}")
         
         blue_bans = ["N/A"] * 5
         red_bans = ["N/A"] * 5
@@ -238,6 +253,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
             sequence = action.get("sequenceNumber")
             action_type = action.get("type")
             debug_logs.append(f"Series {series_id} - Action: sequenceNumber={sequence}, type={action_type}")
+            st.write(f"Series {series_id} - Action: sequenceNumber={sequence}, type={action_type}")
         
         for action in draft_actions:
             sequence = action.get("sequenceNumber")
@@ -247,35 +263,49 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
             is_blue_team = drafter_id == teams[0].get("id")  # team0 — синяя сторона
             
             debug_logs.append(f"Series {series_id} - drafter_id={drafter_id}, team0_id={teams[0].get('id')}, is_blue_team={is_blue_team}")
+            st.write(f"Series {series_id} - drafter_id={drafter_id}, team0_id={teams[0].get('id')}, is_blue_team={is_blue_team}")
             
             if action_type == "ban":
                 if sequence in [1, 3, 5, 14, 16]:  # Баны синей команды
                     if blue_ban_idx < 5:
                         blue_bans[blue_ban_idx] = champion
                         blue_ban_idx += 1
+                        debug_logs.append(f"Series {series_id} - Blue Ban {blue_ban_idx}: {champion}")
+                        st.write(f"Series {series_id} - Blue Ban {blue_ban_idx}: {champion}")
                 elif sequence in [2, 4, 6, 13, 15]:  # Баны красной команды
                     if red_ban_idx < 5:
                         red_bans[red_ban_idx] = champion
                         red_ban_idx += 1
+                        debug_logs.append(f"Series {series_id} - Red Ban {red_ban_idx}: {champion}")
+                        st.write(f"Series {series_id} - Red Ban {red_ban_idx}: {champion}")
             elif action_type == "pick":
                 if sequence in [7, 10, 11, 18, 19]:  # Пики синей команды
                     if blue_pick_idx < 5:
                         blue_picks[blue_pick_idx] = champion
                         blue_pick_idx += 1
+                        debug_logs.append(f"Series {series_id} - Blue Pick {blue_pick_idx}: {champion}")
+                        st.write(f"Series {series_id} - Blue Pick {blue_pick_idx}: {champion}")
                 elif sequence in [8, 9, 12, 17, 20]:  # Пики красной команды
                     if red_pick_idx < 5:
                         red_picks[red_pick_idx] = champion
                         red_pick_idx += 1
+                        debug_logs.append(f"Series {series_id} - Red Pick {red_pick_idx}: {champion}")
+                        st.write(f"Series {series_id} - Red Pick {red_pick_idx}: {champion}")
         
         # Длительность
         clock = game_data.get("clock", {})
         debug_logs.append(f"Series {series_id} - clock: {json.dumps(clock, indent=2)}")
+        st.write(f"Series {series_id} - clock: {json.dumps(clock, indent=2)}")
         
         duration_seconds = clock.get("currentSeconds", "N/A")
         if isinstance(duration_seconds, (int, float)):
             duration = f"{int(duration_seconds // 60)}:{int(duration_seconds % 60):02d}"  # Переводим секунды в формат MM:SS
+            debug_logs.append(f"Series {series_id} - Duration: {duration}")
+            st.write(f"Series {series_id} - Duration: {duration}")
         else:
             duration = "N/A"
+            debug_logs.append(f"Series {series_id} - Duration not found (currentSeconds: {duration_seconds})")
+            st.write(f"Series {series_id} - Duration not found (currentSeconds: {duration_seconds})")
         
         # Победа или поражение
         win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
@@ -292,18 +322,28 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         existing_match_ids.add(match_id)
     
     debug_logs.append(f"Всего серий для Gamespace MC: {gamespace_series_count}")
+    st.write(f"Всего серий для Gamespace MC: {gamespace_series_count}")
     debug_logs.append(f"Пропущено дубликатов: {skipped_duplicates}")
+    st.write(f"Пропущено дубликатов: {skipped_duplicates}")
     debug_logs.append(f"Новых строк для добавления: {len(new_rows)}")
+    st.write(f"Новых строк для добавления: {len(new_rows)}")
     
     if new_rows:
         try:
             worksheet.append_rows(new_rows)
             debug_logs.append(f"Успешно добавлено {len(new_rows)} строк в Google Sheets.")
-            return True
+            st.write(f"Успешно добавлено {len(new_rows)} строк в Google Sheets.")
         except Exception as e:
             debug_logs.append(f"Ошибка при добавлении данных в Google Sheets: {str(e)}")
+            st.write(f"Ошибка при добавлении данных в Google Sheets: {str(e)}")
             return False
-    return False
+    else:
+        debug_logs.append("Нет новых строк для добавления.")
+        st.write("Нет новых строк для добавления.")
+    
+    debug_logs.append("Процесс обновления данных завершён.")
+    st.write("Процесс обновления данных завершён.")
+    return True
 
 # Функция для агрегации данных из Google Sheets с фильтрацией по времени
 def aggregate_scrims_data(worksheet, time_filter="All"):
@@ -419,7 +459,7 @@ def scrims_page():
             else:
                 st.warning("No series found for Gamespace MC.")
 
-    # Отображаем отладочные сообщения
+    # Отображаем отладочные сообщения (на случай, если что-то пропущено)
     if debug_logs:
         st.subheader("Debug Logs")
         for log in debug_logs:
