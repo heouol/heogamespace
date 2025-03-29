@@ -31,7 +31,7 @@ def check_if_worksheets_exists(spreadsheet, name):
     try:
         wks = spreadsheet.worksheet(name)
     except gspread.exceptions.WorksheetNotFound:
-        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=24)  # 24 столбца
+        wks = spreadsheet.add_worksheet(title=name, rows=1200, cols=23)  # 23 столбца (убрали Patch)
     return wks
 
 # Функция для получения списка всех серий через GraphQL с пагинацией
@@ -153,11 +153,10 @@ def update_scrims_data(worksheet, series_list):
         return False
     
     existing_data = worksheet.get_all_values()
-    existing_match_ids = set(row[2] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID в столбце 3
+    existing_match_ids = set(row[1] for row in existing_data[1:]) if len(existing_data) > 1 else set()  # Match ID теперь в столбце 2 (убрали Patch)
     new_rows = []
     gamespace_series_count = 0  # Счётчик серий для Gamespace MC
     skipped_duplicates = 0  # Счётчик пропущенных дубликатов
-    debug_printed = False  # Флаг для вывода scrim_data только один раз
     
     for i, series in enumerate(series_list):
         series_id = series.get("id")
@@ -183,11 +182,6 @@ def update_scrims_data(worksheet, series_list):
         gamespace_series_count += 1  # Увеличиваем счётчик
         st.write(f"Найдена серия для Gamespace MC (Series {series_id}): {team_0_name} vs {team_1_name}")
         
-        # Выводим scrim_data для отладки (только один раз)
-        if not debug_printed:
-            st.write(f"Структура данных scrim_data для Series {series_id}:", scrim_data)
-            debug_printed = True
-        
         match_id = str(scrim_data.get("matchId", scrim_data.get("id", series_id)))
         if match_id in existing_match_ids:
             st.write(f"Серия {series_id} уже существует в таблице (Match ID: {match_id}). Пропускаем.")
@@ -205,41 +199,69 @@ def update_scrims_data(worksheet, series_list):
                 except ValueError:
                     date = "N/A"
         
-        # Патч
-        patch = scrim_data.get("patch", scrim_data.get("gameVersion", "N/A"))
-        
         # Команды
         blue_team = team_0_name  # Команда 0 — синяя сторона
         red_team = team_1_name   # Команда 1 — красная сторона
         
-        # Баны
-        draft = scrim_data.get("draft", {})
-        blue_bans = draft.get("bans", {}).get("team0", ["N/A"] * 5)[:5]  # Баны синей стороны
-        red_bans = draft.get("bans", {}).get("team1", ["N/A"] * 5)[:5]   # Баны красной стороны
-        
-        # Пики
-        participants = scrim_data.get("participants", [])
+        # Баны и пики
+        game_data = scrim_data.get("object", {}).get("games", [{}])[0]
+        draft_actions = game_data.get("draftActions", [])
+        blue_bans = ["N/A"] * 5
+        red_bans = ["N/A"] * 5
         blue_picks = ["N/A"] * 5
         red_picks = ["N/A"] * 5
-        for i, participant in enumerate(participants[:10]):  # Первые 10 участников (5 синих, 5 красных)
-            champion = participant.get("champion", "N/A")
-            if i < 5:  # Синяя сторона
-                blue_picks[i] = champion
-            else:  # Красная сторона
-                red_picks[i - 5] = champion
+        
+        # Порядок драфт-фазы:
+        # 1-6: ban blue, ban red, ban blue, ban red, ban blue, ban red
+        # 7-12: pick blue, pick red, pick red, pick blue, pick blue, pick red
+        # 13-16: ban red, ban blue, ban red, ban blue
+        # 17-20: pick red, pick blue, pick blue, pick red
+        blue_ban_idx = 0
+        red_ban_idx = 0
+        blue_pick_idx = 0
+        red_pick_idx = 0
+        
+        for action in draft_actions:
+            sequence = action.get("sequenceNumber")
+            action_type = action.get("type")
+            drafter_id = action.get("drafter", {}).get("id")
+            champion = action.get("draftable", {}).get("name", "N/A")
+            is_blue_team = drafter_id == teams[0].get("id")  # team0 — синяя сторона
+            
+            if action_type == "ban":
+                if sequence in [1, 3, 5, 14, 16]:  # Баны синей команды
+                    if blue_ban_idx < 5:
+                        blue_bans[blue_ban_idx] = champion
+                        blue_ban_idx += 1
+                elif sequence in [2, 4, 6, 13, 15]:  # Баны красной команды
+                    if red_ban_idx < 5:
+                        red_bans[red_ban_idx] = champion
+                        red_ban_idx += 1
+            elif action_type == "pick":
+                if sequence in [7, 10, 11, 18, 19]:  # Пики синей команды
+                    if blue_pick_idx < 5:
+                        blue_picks[blue_pick_idx] = champion
+                        blue_pick_idx += 1
+                elif sequence in [8, 9, 12, 17, 20]:  # Пики красной команды
+                    if red_pick_idx < 5:
+                        red_picks[red_pick_idx] = champion
+                        red_pick_idx += 1
         
         # Длительность
-        duration = scrim_data.get("duration", scrim_data.get("gameDuration", "N/A"))
-        if isinstance(duration, (int, float)):
-            duration = f"{int(duration // 60)}:{int(duration % 60):02d}"  # Переводим секунды в формат MM:SS
+        clock = game_data.get("clock", {})
+        duration_seconds = clock.get("currentSeconds", "N/A")
+        if isinstance(duration_seconds, (int, float)):
+            duration = f"{int(duration_seconds // 60)}:{int(duration_seconds % 60):02d}"  # Переводим секунды в формат MM:SS
+        else:
+            duration = "N/A"
         
         # Победа или поражение
         win = teams[0].get("won", False) if team_0_name == TEAM_NAME else teams[1].get("won", False)
         result = "Win" if win else "Loss"
         
-        # Формируем строку
+        # Формируем строку (без Patch)
         new_row = [
-            date, patch, match_id, blue_team, red_team,
+            date, match_id, blue_team, red_team,
             *blue_bans, *red_bans, *blue_picks, *red_picks,
             duration, result
         ]
@@ -261,21 +283,46 @@ def update_scrims_data(worksheet, series_list):
             return False
     return False
 
-# Функция для агрегации данных из Google Sheets
-def aggregate_scrims_data(worksheet):
+# Функция для агрегации данных из Google Sheets с фильтрацией по времени
+def aggregate_scrims_data(worksheet, time_filter="All"):
     blue_side_stats = {"wins": 0, "losses": 0, "total": 0}
     red_side_stats = {"wins": 0, "losses": 0, "total": 0}
     match_history = []
+
+    # Определяем временной диапазон
+    current_date = datetime.utcnow()
+    if time_filter == "1 Week":
+        time_threshold = current_date - timedelta(weeks=1)
+    elif time_filter == "2 Weeks":
+        time_threshold = current_date - timedelta(weeks=2)
+    elif time_filter == "3 Weeks":
+        time_threshold = current_date - timedelta(weeks=3)
+    elif time_filter == "4 Weeks":
+        time_threshold = current_date - timedelta(weeks=4)
+    elif time_filter == "2 Months":
+        time_threshold = current_date - timedelta(days=60)
+    else:
+        time_threshold = None  # Без фильтра (All)
 
     data = worksheet.get_all_values()
     if len(data) <= 1:
         return blue_side_stats, red_side_stats, match_history
 
     for row in data[1:]:
-        if len(row) < 24:  # Ожидаем 24 столбца
+        if len(row) < 23:  # Ожидаем 23 столбца (убрали Patch)
             continue
         
-        date, patch, match_id, blue_team, red_team, *_, duration, result = row
+        date, match_id, blue_team, red_team, *_, duration, result = row
+        
+        # Фильтрация по времени
+        if time_threshold:
+            try:
+                match_date = datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+                if match_date < time_threshold:
+                    continue  # Пропускаем, если матч старше выбранного диапазона
+            except ValueError:
+                continue  # Пропускаем, если дата некорректна
+        
         win = result == "Win"
         is_blue_side = blue_team == TEAM_NAME
 
@@ -294,7 +341,6 @@ def aggregate_scrims_data(worksheet):
 
         match_history.append({
             "Date": date,
-            "Patch": patch,
             "Match ID": match_id,
             "Blue Team": blue_team,
             "Red Team": red_team,
@@ -328,7 +374,7 @@ def scrims_page():
     wks = check_if_worksheets_exists(spreadsheet, "Scrims")
     if not wks.get_all_values():
         wks.append_row([
-            "Date", "Patch", "Match ID", "Blue Team", "Red Team",
+            "Date", "Match ID", "Blue Team", "Red Team",
             "Blue Ban 1", "Blue Ban 2", "Blue Ban 3", "Blue Ban 4", "Blue Ban 5",
             "Red Ban 1", "Red Ban 2", "Red Ban 3", "Red Ban 4", "Red Ban 5",
             "Blue Pick 1", "Blue Pick 2", "Blue Pick 3", "Blue Pick 4", "Blue Pick 5",
@@ -348,8 +394,14 @@ def scrims_page():
             else:
                 st.warning("No series found for Gamespace MC.")
 
-    # Агрегация и отображение
-    blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks)
+    # Выпадающий список для фильтрации по времени
+    time_filter = st.selectbox(
+        "Filter by Time Range",
+        ["All", "1 Week", "2 Weeks", "3 Weeks", "4 Weeks", "2 Months"]
+    )
+
+    # Агрегация и отображение с учётом фильтра
+    blue_side_stats, red_side_stats, match_history = aggregate_scrims_data(wks, time_filter)
     total_matches = blue_side_stats["total"] + red_side_stats["total"]
     wins = blue_side_stats["wins"] + red_side_stats["wins"]
     losses = blue_side_stats["losses"] + red_side_stats["losses"]
@@ -367,9 +419,9 @@ def scrims_page():
         df_history = pd.DataFrame(match_history)
         st.markdown(df_history.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
-        st.write("No match history available.")
+        st.write("No match history available for the selected time range.")
 
-    # Обновлённый CSS для тёмной темы
+    # CSS для тёмной темы
     st.markdown("""
         <style>
         table { 
