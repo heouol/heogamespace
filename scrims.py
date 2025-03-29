@@ -298,28 +298,35 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                         if seq in [7,10,11,18,19]: bp += 1; b_picks[bp-1] = champ if bp <= 5 else champ
                         elif seq in [8,9,12,17,20]: rp += 1; r_picks[rp-1] = champ if rp <= 5 else champ
                 except Exception: continue
-        duration_f = "N/A";
+        duration_f = "N/A" # Default formatted duration
+
+        # Try to format duration if available and valid
         if isinstance(duration_s, (int, float)) and duration_s >= 0:
+            # Use a nested block for clarity
             try:
                 minutes = int(duration_s // 60)
                 seconds = int(duration_s % 60)
-                duration_f = f"{minutes}:{seconds:02d}" # Формат MM:SS
+                # Assign formatted duration ONLY if successful
+                duration_f = f"{minutes}:{seconds:02d}"
             except Exception as e:
-                # Можно добавить логгирование ошибки форматирования, если нужно
-                # debug_logs.append(f"Warn: Formatting duration {duration_s} failed: {e}")
-                pass # Оставляем duration_f как "N/A" при ошибке форматирования
-        # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+                # Log the formatting error if debugging is needed later
+                # debug_logs.append(f"Warn: Could not format duration {duration_s}: {e}")
+                # duration_f remains "N/A" if formatting fails
+                pass
 
-       res = "N/A" # Default result
-        t0w, t1w = t0.get("won"), t1.get("won")
+        # --- Определение результата начинается здесь, С ТЕМ ЖЕ ОТСТУПОМ, что и duration_f = "N/A" ---
+        res = "N/A" # Default result
+        t0w = t0.get("won")
+        t1w = t1.get("won")
 
+        # Determine result based on win status
         if t0w is True:
             res = "Win" if t0_n == TEAM_NAME else "Loss"
         elif t1w is True:
             res = "Win" if t1_n == TEAM_NAME else "Loss"
-        elif t0w is False and t1w is False and t0.get("outcome") == "tie":
-            # Убедимся, что оба проиграли ИЛИ исход "tie" (зависит от данных API)
-            res = "Tie"
+        elif t0w is False and t1w is False:
+             # Could check for t0.get("outcome") == "tie" if API provides it
+             res = "Tie"
         new_row = [date_f, m_id, b_team, r_team, *b_bans, *r_bans, *b_picks, *r_picks, duration_f, res]
         if len(new_row) != 26: continue
         new_rows.append(new_row); existing_ids.add(m_id); processed += 1
