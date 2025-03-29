@@ -1625,20 +1625,36 @@ if 'username' not in st.session_state:
 
 # Attempt login only if status is None (initial state)
 if st.session_state.authentication_status is None:
-    try:
-        # The login method returns name, status, username
-        name, authentication_status, username = authenticator.login('Login', 'main')
-        # Update session state with the results from authenticator.login
-        st.session_state.name = name
-        st.session_state.authentication_status = authentication_status
-        st.session_state.username = username
-    except KeyError as e:
-         # This can happen if config.yaml structure is wrong (e.g., missing 'usernames')
-         st.error(f"Authentication Error: Missing key {e} in config.yaml credentials. Please check the structure.")
-         st.stop()
-    except Exception as e:
-         st.error(f"An unexpected error occurred during login: {e}")
-         st.stop()
+    with login_placeholder.container():
+        try:
+            # The login method returns name, status, username
+            # name, authentication_status, username = authenticator.login('Login', 'main') # <-- СТАРАЯ СТРОКА С ОШИБКОЙ
+            # Update session state with the results from authenticator.login
+            # st.session_state.name = name                       # <-- СТАРЫЕ СТРОКИ
+            # st.session_state.authentication_status = authentication_status
+            # st.session_state.username = username
+
+            # --- ИСПРАВЛЕННЫЙ ВЫЗОВ ---
+            name, authentication_status, username = authenticator.login(
+                location='main', # Явно указываем местоположение
+                # label='User Login' # Опционально: Заголовок формы
+                # fields={...} # Опционально: Кастомные поля, если нужно
+            )
+            # Обновляем session state ПОСЛЕ вызова login
+            st.session_state.name = name
+            st.session_state.authentication_status = authentication_status
+            st.session_state.username = username
+            # --- КОНЕЦ ИСПРАВЛЕНИЙ ---
+
+        except KeyError as e:
+            st.error(f"Authentication Error: Missing key {e} in config.yaml credentials. Please check the structure.")
+            st.stop()
+        except Exception as e:
+             st.error(f"An unexpected error occurred during login: {e}")
+             # Добавим вывод полного трейсбека для отладки, если нужно
+             # import traceback
+             # st.error(traceback.format_exc())
+             st.stop()
 
 
 # --- Post-Authentication Logic ---
