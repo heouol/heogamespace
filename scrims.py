@@ -156,30 +156,93 @@ def get_all_series(_debug_placeholder):
     # print("\n".join(internal_logs)) # Optional print for server logs
     return all_series_nodes
 
-def download_series_data(sid,logs,max_ret=3,delay_init=2):
-    hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/series/{sid}"
-    for att in range(max_ret):
-        try: resp=requests.get(url,headers=hdr,timeout=15);
-        if resp.status_code==200: try:return resp.json(); except json.JSONDecodeError:logs.append(f"Err:JSON S {sid}");return None
-        elif resp.status_code==429: dly=delay_init*(2**att); logs.append(f"Warn:429 S {sid}.Wait {dly}s"); st.toast(f"Wait {dly}s..."); time.sleep(dly); continue
-        elif resp.status_code==404: return None
-        else: logs.append(f"Err:S {sid} St {resp.status_code}"); resp.raise_for_status()
+def download_series_data(series_id, debug_logs, max_retries=3, initial_delay=2):
+    """Downloads end-state data for a specific series ID."""
+    headers = {"x-api-key": GRID_API_KEY}
+    url = f"https://api.grid.gg/file-download/end-state/grid/series/{series_id}"
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            # debug_logs.append(f"Series {series_id} Request: GET {url} -> Status {response.status_code}") # Optional logging
+
+            # --- ИСПРАВЛЕННЫЙ БЛОК ---
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except json.JSONDecodeError:
+                    debug_logs.append(f"Error: Could not decode JSON for Series {series_id}. Content: {response.text[:200]}")
+                    # st.warning(f"Invalid JSON received for Series {series_id}") # Less verbose
+                    return None
+            elif response.status_code == 429:
+                delay = initial_delay * (2 ** attempt)
+                debug_logs.append(f"Warn: 429 S {series_id}. Wait {delay}s (Att {attempt+1}/{max_retries})")
+                st.toast(f"Rate limit hit, waiting {delay}s...")
+                time.sleep(delay)
+                continue # Retry
+            elif response.status_code == 404:
+                # debug_logs.append(f"Info: Series {series_id} 404.") # Less verbose logging for 404
+                return None # Don't retry
+            else:
+                debug_logs.append(f"Error: API S {series_id} Status {response.status_code}, Resp: {response.text[:200]}")
+                response.raise_for_status() # Raise other errors
+            # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+
         except requests.exceptions.RequestException as e:
-            if att<max_ret-1:time.sleep(delay_init*(2**att))
-            else:st.error(f"Net err S {sid}:{e}");return None
+            debug_logs.append(f"Error: Network S {series_id} (Att {attempt+1}): {e}")
+            if attempt < max_retries - 1:
+                 delay = initial_delay * (2 ** attempt)
+                 time.sleep(delay)
+            else:
+                 st.error(f"Network error fetching series {series_id} after {max_retries} attempts: {e}")
+                 return None
+
+    debug_logs.append(f"Error: Failed S {series_id} download after {max_retries} attempts.")
     return None
 
-def download_game_data(gid,logs,max_ret=3,delay_init=2):
-    hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/game/{gid}"
-    for att in range(max_ret):
-        try: resp=requests.get(url,headers=hdr,timeout=15);
-        if resp.status_code==200: try:return resp.json(); except json.JSONDecodeError:logs.append(f"Err:JSON G {gid}");return None
-        elif resp.status_code==429: dly=delay_init*(2**att); logs.append(f"Warn:429 G {gid}.Wait {dly}s"); st.toast(f"Wait {dly}s..."); time.sleep(dly); continue
-        elif resp.status_code==404: return None
-        else: logs.append(f"Err:G {gid} St {resp.status_code}"); resp.raise_for_status()
+
+def download_game_data(game_id, debug_logs, max_retries=3, initial_delay=2):
+    """Downloads end-state data for a specific game ID."""
+    headers = {"x-api-key": GRID_API_KEY}
+    url = f"https://api.grid.gg/file-download/end-state/grid/game/{game_id}"
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=15)
+            # debug_logs.append(f"Game {game_id} Request: GET {url} -> Status {response.status_code}") # Optional logging
+
+            # --- ИСПРАВЛЕННЫЙ БЛОК ---
+            if response.status_code == 200:
+                 try:
+                    return response.json()
+                 except json.JSONDecodeError:
+                     debug_logs.append(f"Error: Could not decode JSON for Game {game_id}. Content: {response.text[:200]}")
+                     # st.warning(f"Invalid JSON received for Game {game_id}") # Less verbose
+                     return None
+            elif response.status_code == 429:
+                delay = initial_delay * (2 ** attempt)
+                debug_logs.append(f"Warn: 429 G {game_id}. Wait {delay}s (Att {attempt+1}/{max_retries})")
+                st.toast(f"Rate limit hit, waiting {delay}s...")
+                time.sleep(delay)
+                continue # Retry
+            elif response.status_code == 404:
+                # debug_logs.append(f"Info: Game {game_id} 404.") # Less verbose
+                return None # Don't retry
+            else:
+                 debug_logs.append(f"Error: API G {game_id} Status {response.status_code}, Resp: {response.text[:200]}")
+                 response.raise_for_status()
+            # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+
         except requests.exceptions.RequestException as e:
-            if att<max_ret-1:time.sleep(delay_init*(2**att))
-            else:st.error(f"Net err G {gid}:{e}");return None
+            debug_logs.append(f"Error: Network G {game_id} (Att {attempt+1}): {e}")
+            if attempt < max_retries - 1:
+                 delay = initial_delay * (2 ** attempt)
+                 time.sleep(delay)
+            else:
+                 st.error(f"Network error fetching game {game_id} after {max_retries} attempts: {e}")
+                 return None
+
+    debug_logs.append(f"Error: Failed G {game_id} download after {max_retries} attempts.")
     return None
 
 
