@@ -310,8 +310,16 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                 pass # Оставляем duration_f как "N/A" при ошибке форматирования
         # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
 
-        res = "N/A"; t0w, t1w = t0.get("won"), t1.get("won")
-        if t0w is True: res="Win" if t0_n==TEAM_NAME else "Loss"; elif t1w is True: res="Win" if t1_n==TEAM_NAME else "Loss"; elif t0w is False and t1w is False and t0.get("outcome")=="tie": res="Tie"
+       res = "N/A" # Default result
+        t0w, t1w = t0.get("won"), t1.get("won")
+
+        if t0w is True:
+            res = "Win" if t0_n == TEAM_NAME else "Loss"
+        elif t1w is True:
+            res = "Win" if t1_n == TEAM_NAME else "Loss"
+        elif t0w is False and t1w is False and t0.get("outcome") == "tie":
+            # Убедимся, что оба проиграли ИЛИ исход "tie" (зависит от данных API)
+            res = "Tie"
         new_row = [date_f, m_id, b_team, r_team, *b_bans, *r_bans, *b_picks, *r_picks, duration_f, res]
         if len(new_row) != 26: continue
         new_rows.append(new_row); existing_ids.add(m_id); processed += 1
