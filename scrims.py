@@ -190,6 +190,7 @@ def download_game_data(game_id, max_retries=3, initial_delay=5, debug_logs=None)
     return None
 
 # Функция для обновления данных в Google Sheets
+# Функция для обновления данных в Google Sheets
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     if not series_list:
         debug_logs.append("Список серий пуст. Нечего обновлять.")
@@ -376,7 +377,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     
     debug_logs.append(f"Всего серий для Gamespace MC: {gamespace_series_count}")
     st.write(f"Всего серий для Gamespace MC: {gamespace_series_count}")
-    debug_logs.append(f"Пропущено дубликатов: {skව: 1px solid #ddd; padding: 5px; margin-bottom: 10px;">Пропущено дубликатов: {skipped_duplicates}")
+    debug_logs.append(f"Пропущено дубликатов: {skipped_duplicates}")  # Исправлено
     st.write(f"Пропущено дубликатов: {skipped_duplicates}")
     debug_logs.append(f"Новых строк для добавления: {len(new_rows)}")
     st.write(f"Новых строк для добавления: {len(new_rows)}")
