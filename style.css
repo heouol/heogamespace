@@ -1,0 +1,24 @@
+/* style.css */
+.compact-table {
+    font-size: 0.85rem; /* Меньше шрифт */
+    width: auto; /* Авто ширина */
+    margin: 5px auto; /* Центрирование и отступы */
+    border-collapse: collapse; /* Убрать двойные границы */
+}
+.compact-table th,
+.compact-table td {
+    padding: 3px 5px; /* Уменьшить отступы в ячейках */
+    text-align: center; /* Центрировать текст */
+    border: 1px solid #333; /* Тонкие границы */
+    white-space: nowrap; /* Запретить перенос текста в ячейках */
+}
+.compact-table img {
+    vertical-align: middle;
+    margin: 0 1px; /* Небольшой отступ между иконками */
+}
+.history-table td:nth-child(3), /* B Bans */
+.history-table td:nth-child(4), /* B Picks */
+.history-table td:nth-child(7), /* R Picks */
+.history-table td:nth-child(8) { /* R Bans */
+    min-width: 150px; /* Минимальная ширина для колонок с иконками */
+}
