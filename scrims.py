@@ -212,7 +212,9 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         # Баны и пики
         game_data = scrim_data.get("object", {}).get("games", [{}])[0]
         
-        # Отладка: проверяем, что содержится в draftActions
+        # Отладка: выводим всю структуру game_data
+        debug_logs.append(f"Series {series_id} - game_data: {json.dumps(game_data, indent=2)}")
+        
         draft_actions = game_data.get("draftActions", [])
         debug_logs.append(f"Series {series_id} - draftActions: {json.dumps(draft_actions, indent=2)}")
         
@@ -231,12 +233,20 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         blue_pick_idx = 0
         red_pick_idx = 0
         
+        # Отладка: выводим все sequenceNumber и type
+        for action in draft_actions:
+            sequence = action.get("sequenceNumber")
+            action_type = action.get("type")
+            debug_logs.append(f"Series {series_id} - Action: sequenceNumber={sequence}, type={action_type}")
+        
         for action in draft_actions:
             sequence = action.get("sequenceNumber")
             action_type = action.get("type")
             drafter_id = action.get("drafter", {}).get("id")
             champion = action.get("draftable", {}).get("name", "N/A")
             is_blue_team = drafter_id == teams[0].get("id")  # team0 — синяя сторона
+            
+            debug_logs.append(f"Series {series_id} - drafter_id={drafter_id}, team0_id={teams[0].get('id')}, is_blue_team={is_blue_team}")
             
             if action_type == "ban":
                 if sequence in [1, 3, 5, 14, 16]:  # Баны синей команды
@@ -259,7 +269,6 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         
         # Длительность
         clock = game_data.get("clock", {})
-        # Отладка: проверяем, что содержится в clock
         debug_logs.append(f"Series {series_id} - clock: {json.dumps(clock, indent=2)}")
         
         duration_seconds = clock.get("currentSeconds", "N/A")
