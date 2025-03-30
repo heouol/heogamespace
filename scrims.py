@@ -107,30 +107,68 @@ def get_all_series(_debug_placeholder):
         except Exception as e: st.error(f"Err fetch series pg {pg_num}:{e}"); return[]
     return nodes
 
-def download_series_data(sid,logs,max_ret=3,delay_init=2):
+def download_series_data(sid, logs, max_ret=3, delay_init=2):
     hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/series/{sid}"
     for att in range(max_ret):
-        try: resp=requests.get(url,headers=hdr,timeout=15);
-        if resp.status_code==200: try:return resp.json(); except json.JSONDecodeError:logs.append(f"Err:JSON S {sid}");return None
-        elif resp.status_code==429: dly=delay_init*(2**att); logs.append(f"Warn:429 S {sid}.Wait {dly}s"); st.toast(f"Wait {dly}s..."); time.sleep(dly); continue
-        elif resp.status_code==404: return None
-        else: logs.append(f"Err:S {sid} St {resp.status_code}"); resp.raise_for_status()
+        try:
+            resp=requests.get(url, headers=hdr, timeout=15);
+            # --- ИСПРАВЛЕННЫЙ БЛОК ---
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except json.JSONDecodeError:
+                    logs.append(f"Err:JSON S {sid}")
+                    return None
+            elif resp.status_code == 429:
+                dly = delay_init*(2**att)
+                logs.append(f"Warn:429 S {sid}.Wait {dly}s")
+                st.toast(f"Wait {dly}s...")
+                time.sleep(dly)
+                continue
+            elif resp.status_code == 404:
+                return None
+            else:
+                logs.append(f"Err:S {sid} St {resp.status_code}")
+                resp.raise_for_status()
+            # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
         except requests.exceptions.RequestException as e:
-            if att<max_ret-1:time.sleep(delay_init*(2**att))
-            else:st.error(f"Net err S {sid}:{e}");return None
+            if att < max_ret-1:
+                time.sleep(delay_init*(2**att))
+            else:
+                st.error(f"Net err S {sid}:{e}")
+                return None
     return None
 
-def download_game_data(gid,logs,max_ret=3,delay_init=2):
+def download_game_data(gid, logs, max_ret=3, delay_init=2):
     hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/game/{gid}"
     for att in range(max_ret):
-        try: resp=requests.get(url,headers=hdr,timeout=15);
-        if resp.status_code==200: try:return resp.json(); except json.JSONDecodeError:logs.append(f"Err:JSON G {gid}");return None
-        elif resp.status_code==429: dly=delay_init*(2**att); logs.append(f"Warn:429 G {gid}.Wait {dly}s"); st.toast(f"Wait {dly}s..."); time.sleep(dly); continue
-        elif resp.status_code==404: return None
-        else: logs.append(f"Err:G {gid} St {resp.status_code}"); resp.raise_for_status()
+        try:
+            resp=requests.get(url, headers=hdr, timeout=15);
+            # --- ИСПРАВЛЕННЫЙ БЛОК ---
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except json.JSONDecodeError:
+                    logs.append(f"Err:JSON G {gid}")
+                    return None
+            elif resp.status_code == 429:
+                dly = delay_init*(2**att)
+                logs.append(f"Warn:429 G {gid}.Wait {dly}s")
+                st.toast(f"Wait {dly}s...")
+                time.sleep(dly)
+                continue
+            elif resp.status_code == 404:
+                return None
+            else:
+                logs.append(f"Err:G {gid} St {resp.status_code}")
+                resp.raise_for_status()
+            # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
         except requests.exceptions.RequestException as e:
-            if att<max_ret-1:time.sleep(delay_init*(2**att))
-            else:st.error(f"Net err G {gid}:{e}");return None
+            if att < max_ret-1:
+                time.sleep(delay_init*(2**att))
+            else:
+                st.error(f"Net err G {gid}:{e}")
+                return None
     return None
 
 
