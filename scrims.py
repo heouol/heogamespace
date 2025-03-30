@@ -354,15 +354,22 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
 
 
 # --- ИЗМЕНЕНА: aggregate_scrims_data (теперь возвращает и статистику игроков) ---
+# В файле scrims.py
+
+# --- aggregate_scrims_data (ИСПРАВЛЕНЫ ОТСТУПЫ) ---
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
-    if not worksheet: return {}, {}, pd.DataFrame(), {} # Добавляем пустой словарь для статы игроков
+    if not worksheet:
+        st.error("Aggregate Error: Invalid worksheet object.")
+        return {}, {}, pd.DataFrame(), {} # Добавляем пустой словарь для статы игроков
 
     blue_stats, red_stats, history_rows, expected_cols = {"wins":0,"losses":0,"total":0}, {"wins":0,"losses":0,"total":0}, [], 26
     player_stats = defaultdict(lambda: defaultdict(lambda: {'games': 0, 'wins': 0})) # Для статистики игроков
 
     now, time_threshold = datetime.utcnow(), None
     if time_filter == "1 Week": time_threshold = now - timedelta(weeks=1)
-    # ... (другие фильтры времени) ...
+    elif time_filter == "2 Weeks": time_threshold = now - timedelta(weeks=2)
+    elif time_filter == "3 Weeks": time_threshold = now - timedelta(weeks=3)
+    elif time_filter == "4 Weeks": time_threshold = now - timedelta(weeks=4)
     elif time_filter == "2 Months": time_threshold = now - timedelta(days=60)
 
     try: data = worksheet.get_all_values()
@@ -373,15 +380,21 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
     try: idx = {name: header.index(name) for name in ["Date","Match ID","Blue Team","Red Team","Duration","Result","Blue Ban 1","Blue Ban 2","Blue Ban 3","Blue Ban 4","Blue Ban 5","Red Ban 1","Red Ban 2","Red Ban 3","Red Ban 4","Red Ban 5","Blue Pick 1","Blue Pick 2","Blue Pick 3","Blue Pick 4","Blue Pick 5","Red Pick 1","Red Pick 2","Red Pick 3","Red Pick 4","Red Pick 5"]}
     except ValueError as e: st.error(f"Header error agg: {e}."); return blue_stats, red_stats, pd.DataFrame(), {}
 
-    # Получаем обратную карту Роль -> Игрок ID
-    role_to_player_id = {role_str: player_id for player_id, role_str in PLAYER_ROLES_BY_ID.items()}
+    # Получаем обратную карту Роль -> ID игрока
+    # Убедимся, что PLAYER_ROLES_BY_ID определен где-то выше в файле
+    try:
+        role_to_player_id = {role_str: player_id for player_id, role_str in PLAYER_ROLES_BY_ID.items()}
+    except NameError:
+        st.error("Aggregate Error: PLAYER_ROLES_BY_ID not defined.")
+        return blue_stats, red_stats, pd.DataFrame(), {}
 
-    for row in data[1:]:
+
+    for row_index, row in enumerate(data[1:], start=2): # Добавим индекс для логгирования
         if len(row) < expected_cols: continue
         try:
-            date_str = row[idx["Date"]];
+            date_str = row[idx["Date"]]
 
-            # --- ИСПРАВЛЕННЫЙ БЛОК ФИЛЬТРАЦИИ ПО ВРЕМЕНИ ---
+            # Фильтрация по времени
             if time_threshold and date_str != "N/A":
                 try:
                     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
@@ -389,31 +402,43 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
                         continue # Пропускаем строку, если она старше фильтра
                 except ValueError:
                     # Пропускаем строку, если дата некорректна при активном фильтре
-                    continue
+                    continue # Или можно не пропускать, если нужна вся история для игроков
+
             b_team, r_team, res = row[idx["Blue Team"]], row[idx["Red Team"]], row[idx["Result"]]
             is_our, is_blue, our_picks_in_row = False, False, []
             is_our_win = False
 
-            if b_team == TEAM_NAME: is_our, is_blue = True, True; our_picks_in_row = [row[idx[f"Blue Pick {i}"]] for i in range(1,6)]; is_our_win = (res=="Win")
-            elif r_team == TEAM_NAME: is_our, is_blue = True, False; our_picks_in_row = [row[idx[f"Red Pick {i}"]] for i in range(1,6)]; is_our_win = (res=="Win")
+            if b_team == TEAM_NAME:
+                 is_our, is_blue = True, True
+                 our_picks_in_row = [row[idx[f"Blue Pick {i}"]] for i in range(1,6)]
+                 is_our_win = (res=="Win")
+            elif r_team == TEAM_NAME:
+                 is_our, is_blue = True, False
+                 our_picks_in_row = [row[idx[f"Red Pick {i}"]] for i in range(1,6)]
+                 is_our_win = (res=="Win")
 
-            # --- Считаем общую стату по сторонам ---
+            # --- Блок подсчета статистики с ИСПРАВЛЕННЫМИ ОТСТУПАМИ ---
             if is_our:
                 win = (res == "Win") # Определяем победу один раз
                 if is_blue:
-                blue_stats["total"] += 1
-                if win:
-                    blue_stats["wins"] += 1
-                elif res == "Loss": # Используем res для проверки поражения
-                    blue_stats["losses"] += 1
-            else: # Red side
-                red_stats["total"] += 1
-                if win:
-                    red_stats["wins"] += 1
-                elif res == "Loss": # Используем res для проверки поражения
-                    red_stats["losses"] += 1
+                    # Отступ для блока if is_blue:
+                    blue_stats["total"] += 1
+                    if win:
+                        # Отступ для блока if win:
+                        blue_stats["wins"] += 1
+                    elif res == "Loss":
+                        # Отступ для блока elif res == "Loss":
+                        blue_stats["losses"] += 1
+                else: # Red side (На том же уровне отступа, что и if is_blue:)
+                    red_stats["total"] += 1
+                    if win:
+                        # Отступ для блока if win:
+                        red_stats["wins"] += 1
+                    elif res == "Loss":
+                        # Отступ для блока elif res == "Loss":
+                        red_stats["losses"] += 1
 
-                # --- Считаем стату игроков/чемпионов ---
+                # --- Считаем стату игроков/чемпионов (на том же уровне отступа, что и if is_blue:/else:) ---
                 for i, role in enumerate(ROLE_ORDER_FOR_SHEET):
                      player_id_for_role = None
                      # Ищем ID игрока для этой роли в нашем ростере
@@ -422,6 +447,7 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
                              player_id_for_role = p_id
                              break
 
+                     # Убедимся, что PLAYER_IDS определен где-то выше
                      player_name = PLAYER_IDS.get(player_id_for_role) # Получаем имя игрока по ID
                      if player_name and i < len(our_picks_in_row):
                          champion = our_picks_in_row[i]
@@ -429,6 +455,8 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
                              player_stats[player_name][champion]['games'] += 1
                              if is_our_win:
                                  player_stats[player_name][champion]['wins'] += 1
+            # --- Конец блока if is_our: ---
+
 
             # --- Готовим строку для истории матчей ---
             bb_html=" ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if idx.get(f"Blue Ban {i}") is not None and row[idx[f"Blue Ban {i}"]] != "N/A")
@@ -436,7 +464,12 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
             bp_html=" ".join(get_champion_icon_html(row[idx[f"Blue Pick {i}"]]) for i in range(1, 6) if idx.get(f"Blue Pick {i}") is not None and row[idx[f"Blue Pick {i}"]] != "N/A")
             rp_html=" ".join(get_champion_icon_html(row[idx[f"Red Pick {i}"]]) for i in range(1, 6) if idx.get(f"Red Pick {i}") is not None and row[idx[f"Red Pick {i}"]] != "N/A")
             history_rows.append({"Date":date_str,"Blue Team":b_team,"B Bans":bb_html,"B Picks":bp_html,"Result":res,"Duration":row[idx["Duration"]],"R Picks":rp_html,"R Bans":rb_html,"Red Team":r_team,"Match ID":row[idx["Match ID"]]})
-        except Exception: continue # Пропускаем строку при любой ошибке обработки
+        except IndexError:
+            # st.warning(f"Skipping row {row_index} due to IndexError") # Optional
+            continue
+        except Exception as e_inner:
+            # st.warning(f"Skipping row {row_index} due to processing error: {e_inner}") # Optional
+            continue # Пропускаем строку при любой ошибке обработки
 
     df_hist = pd.DataFrame(history_rows);
     try: df_hist['DT'] = pd.to_datetime(df_hist['Date'], errors='coerce'); df_hist = df_hist.sort_values(by='DT', ascending=False).drop(columns=['DT'])
@@ -447,7 +480,7 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
     for player in final_player_stats:
         final_player_stats[player] = dict(sorted(final_player_stats[player].items(), key=lambda item: item[1]['games'], reverse=True))
 
-    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем 4 значения
+    return blue_stats, red_stats, df_hist, final_player_stats# Возвращаем 4 значения
 
 
 # --- scrims_page (ИЗМЕНЕНА для использования новой aggregate_scrims_data) ---
