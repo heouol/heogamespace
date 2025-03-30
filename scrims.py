@@ -324,8 +324,18 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                 # duration_f remains "N/A" if formatting fails
                 pass
 
-        res = "N/A"; t0w = t0.get("won"); t1w = t1.get("won") # Результат берем из s_data
-        if t0w is True: res="Win" if t0_n==TEAM_NAME else "Loss"; elif t1w is True: res="Win" if t1_n==TEAM_NAME else "Loss"; elif t0w is False and t1w is False: res="Tie"
+       res = "N/A" # Default result
+        t0w = t0.get("won")
+        t1w = t1.get("won")
+
+        # Determine result based on win status
+        if t0w is True:
+            res = "Win" if t0_n == TEAM_NAME else "Loss"
+        elif t1w is True:
+            res = "Win" if t1_n == TEAM_NAME else "Loss"
+        elif t0w is False and t1w is False:
+             # Could check for t0.get("outcome") == "tie" if API provides it
+             res = "Tie"
 
         # --- Собираем строку и добавляем ---
         new_row = [date_f, m_id, b_team_name, r_team_name, *b_bans, *r_bans, *b_picks, *r_picks, duration_f, res]
