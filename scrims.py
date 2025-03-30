@@ -401,17 +401,17 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
             if is_our:
                 win = (res == "Win") # Определяем победу один раз
                 if is_blue:
-                    blue_stats["total"] += 1
-                    if win:
-                        blue_stats["wins"] += 1
-                    elif res == "Loss": # Используем res для проверки поражения
-                        blue_stats["losses"] += 1
-                else: # Red side
-                    red_stats["total"] += 1
-                    if win:
-                        red_stats["wins"] += 1
-                    elif res == "Loss": # Используем res для проверки поражения
-                        red_stats["losses"] += 1
+                blue_stats["total"] += 1
+                if win:
+                    blue_stats["wins"] += 1
+                elif res == "Loss": # Используем res для проверки поражения
+                    blue_stats["losses"] += 1
+            else: # Red side
+                red_stats["total"] += 1
+                if win:
+                    red_stats["wins"] += 1
+                elif res == "Loss": # Используем res для проверки поражения
+                    red_stats["losses"] += 1
 
                 # --- Считаем стату игроков/чемпионов ---
                 for i, role in enumerate(ROLE_ORDER_FOR_SHEET):
