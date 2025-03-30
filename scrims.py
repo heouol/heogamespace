@@ -380,7 +380,16 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
         if len(row) < expected_cols: continue
         try:
             date_str = row[idx["Date"]];
-            if time_threshold and date_str != "N/A": try: date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S"); if date_obj < time_threshold: continue; except ValueError: continue
+
+            # --- ИСПРАВЛЕННЫЙ БЛОК ФИЛЬТРАЦИИ ПО ВРЕМЕНИ ---
+            if time_threshold and date_str != "N/A":
+                try:
+                    date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                    if date_obj < time_threshold:
+                        continue # Пропускаем строку, если она старше фильтра
+                except ValueError:
+                    # Пропускаем строку, если дата некорректна при активном фильтре
+                    continue
             b_team, r_team, res = row[idx["Blue Team"]], row[idx["Red Team"]], row[idx["Result"]]
             is_our, is_blue, our_picks_in_row = False, False, []
             is_our_win = False
