@@ -374,7 +374,7 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
     except ValueError as e: st.error(f"Header error agg: {e}."); return blue_stats, red_stats, pd.DataFrame(), {}
 
     # Получаем обратную карту Роль -> Игрок ID
-    role_to_player_id = {v['role']: k for k, v in PLAYER_ROLES_BY_ID.items()}
+    role_to_player_id = {role_str: player_id for player_id, role_str in PLAYER_ROLES_BY_ID.items()}
 
     for row in data[1:]:
         if len(row) < expected_cols: continue
