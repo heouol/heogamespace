@@ -314,7 +314,15 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
              duration_s = g_data['games'][0].get("clock", {}).get("currentSeconds") # Ищем в данных игры
 
         duration_f = "N/A";
-        if isinstance(duration_s,(int,float)) and duration_s>=0: try: duration_f=f"{int(duration_s//60)}:{int(duration_s%60):02d}" ;except Exception: pass
+        if isinstance(duration_s, (int, float)) and duration_s >= 0:
+            try:
+                minutes = int(duration_s // 60)
+                seconds = int(duration_s % 60)
+                # Assign formatted duration ONLY if successful
+                duration_f = f"{minutes}:{seconds:02d}"
+            except Exception as e:
+                # duration_f remains "N/A" if formatting fails
+                pass
 
         res = "N/A"; t0w = t0.get("won"); t1w = t1.get("won") # Результат берем из s_data
         if t0w is True: res="Win" if t0_n==TEAM_NAME else "Loss"; elif t1w is True: res="Win" if t1_n==TEAM_NAME else "Loss"; elif t0w is False and t1w is False: res="Tie"
