@@ -324,7 +324,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                 # duration_f remains "N/A" if formatting fails
                 pass
 
-       res = "N/A" # Default result
+        res = "N/A" # Default result
         t0w = t0.get("won")
         t1w = t1.get("won")
 
