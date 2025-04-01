@@ -584,8 +584,6 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         if stats['gms_found_in_sdata'] > 0 and stats['processed'] == 0: st.warning(f"Found {stats['gms_found_in_sdata']} potential scrims for ID {OUR_TEAM_ID} in s_data, but could not process them. Check logs for g_data structure/teams warnings or ID mismatch.")
         elif stats['gms_found_in_sdata'] == 0: st.warning(f"No series found containing Team ID {OUR_TEAM_ID} in s_data. Verify filters or data availability.")
         return False
-# --- Конец функции update_scrims_data ---
-
 # --- ВОССТАНОВЛЕННАЯ: aggregate_scrims_data (читает Actual_, без кэша) ---
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
     """
