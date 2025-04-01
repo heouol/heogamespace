@@ -135,7 +135,7 @@ def get_all_series(_debug_placeholder):
     internal_logs = []
     headers = {"x-api-key": GRID_API_KEY,"Content-Type": "application/json"}
     query = """ query ($filter: SeriesFilter, $first: Int, $after: Cursor, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) { allSeries( filter: $filter, first: $first, after: $after, orderBy: $orderBy, orderDirection: $orderDirection ) { totalCount, pageInfo { hasNextPage, endCursor }, edges { node { id, startTimeScheduled } } } } """
-    start_thresh=(datetime.utcnow()-timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_thresh=(datetime.utcnow()-timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
     variables = {"filter":{"titleId":3,"types":["SCRIM"],"startTimeScheduled":{"gte":start_thresh}},"first":50,"orderBy":"StartTimeScheduled","orderDirection":"DESC"}
     nodes,next_pg,cursor,pg_num,max_pg=[],True,None,1,20
     while next_pg and pg_num<=max_pg:
