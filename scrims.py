@@ -212,21 +212,6 @@ def download_game_data(gid, logs, max_ret=3, delay_init=2):
     return None
 
 
-# --- ИЗМЕНЕНА: update_scrims_data (Использует ID игрока для сопоставления пиков) ---
-Похоже, произошла небольшая ошибка при копировании или изменении кода. Сообщение download_series_data() got an unexpected keyword argument 'debug_logs' означает, что мы пытаемся вызвать функцию download_series_data, передавая ей параметр с именем debug_logs, но сама функция ожидает параметр с другим именем (вероятно, просто logs).
-
-То же самое, скорее всего, относится и к функции download_game_data.
-
-Как исправить:
-
-Нужно найти места в функции update_scrims_data, где вызываются download_series_data и download_game_data, и изменить имя передаваемого параметра с debug_logs= на logs=.
-
-Вот полная исправленная версия функции update_scrims_data. Замени старую версию этой функции в твоем scrims.py на эту:
-
-Python
-
-# В файле scrims.py
-
 # --- ИСПРАВЛЕННАЯ: update_scrims_data ---
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     """
