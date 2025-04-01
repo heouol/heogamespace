@@ -514,7 +514,6 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
 # В файле scrims.py
 
 # --- aggregate_scrims_data (ИСПРАВЛЕНЫ ОТСТУПЫ) ---
-@st.cache_data(ttl=600) # Кэшируем результат на 10 минут
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
     """
     Агрегирует данные из Google Sheet, читая фактических чемпионов
