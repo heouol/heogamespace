@@ -484,7 +484,7 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
 
 
 # --- scrims_page (ИЗМЕНЕНА для использования новой aggregate_scrims_data) ---
-def show_scrims_page():
+def scrims_page():
     st.title(" scrims")
 
     # Используй значение по умолчанию или оставь поле пустым
