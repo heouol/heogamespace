@@ -134,15 +134,18 @@ def check_if_scrims_worksheet_exists(spreadsheet, name):
 # В файле scrims.py
 
 # --- ИЗМЕНЕНА: get_all_series (добавлено games { id } в запрос) ---
+# В файле scrims.py
+
+# --- ИСПРАВЛЕНА: get_all_series (возвращен простой GraphQL запрос без games { id }) ---
 @st.cache_data(ttl=300) # Кэшируем список серий на 5 минут
 def get_all_series(_debug_placeholder=None):
     """
-    Получает список ID серий, дат начала и ID первой игры в серии
-    за последние 180 дней.
+    Получает список ID и дат начала серий (скримов) за последние 180 дней.
+    Используется простой GraphQL запрос для избежания ошибки 400 Bad Request.
     """
     internal_logs = [] # Логи для этой функции
     headers = {"x-api-key": GRID_API_KEY, "Content-Type": "application/json"}
-    # !!! ИЗМЕНЕНИЕ: Добавлено games { id } в запрашиваемые поля node !!!
+    # !!! ИЗМЕНЕНИЕ: Возвращен простой запрос без games { id } !!!
     query = """
         query ($filter: SeriesFilter, $first: Int, $after: Cursor, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
           allSeries(
@@ -154,24 +157,22 @@ def get_all_series(_debug_placeholder=None):
             edges {
               node {
                 id,                 # ID Серии (s_id)
-                startTimeScheduled,
-                games(first: 1) {   # Запрашиваем первую игру
-                  id                # ID Игры (g_id)
-                }
+                startTimeScheduled
+                # Поле games { id } убрано для исправления ошибки 400
               }
             }
           }
         }
     """
     # !!! КОНЕЦ ИЗМЕНЕНИЯ !!!
-    start_thresh = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_thresh = (datetime.utcnow() - timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
     variables = {
         "filter": {"titleId": 3, "types": ["SCRIM"], "startTimeScheduled": {"gte": start_thresh}},
         "first": 50, "orderBy": "StartTimeScheduled", "orderDirection": "DESC"
     }
 
     # Отладка переменных запроса (можно закомментировать)
-    print("--- DEBUG: get_all_series GraphQL Variables ---"); print(json.dumps(variables, indent=2)); print("---")
+    # print("--- DEBUG: get_all_series GraphQL Variables ---"); print(json.dumps(variables, indent=2)); print("---")
 
     nodes = []
     next_pg, cursor, pg_num, max_pg = True, None, 1, 20 # Ограничение пагинации
@@ -181,7 +182,7 @@ def get_all_series(_debug_placeholder=None):
         if cursor: curr_vars["after"] = cursor
         try:
             resp = requests.post(f"{GRID_BASE_URL}central-data/graphql", headers=headers, json={"query": query, "variables": curr_vars}, timeout=20)
-            resp.raise_for_status()
+            resp.raise_for_status() # Проверяем на HTTP ошибки (4xx, 5xx)
             data = resp.json()
 
             if "errors" in data:
@@ -196,26 +197,18 @@ def get_all_series(_debug_placeholder=None):
                 print(f"--- DEBUG: get_all_series Results (Page 1) ---")
                 print(f"Total series matching filters: {total_count}")
                 print(f"First {len(edges)} nodes retrieved:")
-                for i, edge in enumerate(edges[:5]): print(f"  Node {i+1}: {edge.get('node')}")
+                for i, edge in enumerate(edges[:5]): print(f"  Node {i+1}: {edge.get('node')}") # Теперь node не содержит games
                 print(f"----------------------------------------------")
 
-            # Извлекаем данные ноды, включая вложенный games[0].id
-            current_nodes = []
-            for edge in edges:
-                node = edge.get("node")
-                if node:
-                    # Извлекаем g_id из вложенной структуры
-                    game_list = node.get("games", [])
-                    g_id = game_list[0].get("id") if game_list and isinstance(game_list[0], dict) else None
-                    current_nodes.append({
-                        "id": node.get("id"), # s_id
-                        "startTimeScheduled": node.get("startTimeScheduled"),
-                        "g_id": g_id # Добавляем g_id сюда
-                    })
-            nodes.extend(current_nodes)
+            # Извлекаем только 'id' и 'startTimeScheduled'
+            nodes.extend([s["node"] for s in edges if "node" in s])
 
             info = s_data.get("pageInfo", {}); next_pg = info.get("hasNextPage", False); cursor = info.get("endCursor");
             pg_num += 1; time.sleep(0.3)
+        except requests.exceptions.HTTPError as http_err:
+             # Логируем конкретно HTTP ошибки, включая 400 Bad Request
+             st.error(f"HTTP error fetching series page {pg_num}: {http_err}")
+             internal_logs.append(f"HTTP error fetching series page {pg_num}: {http_err}"); break
         except requests.exceptions.RequestException as e:
             st.error(f"Network error fetching series page {pg_num}: {e}")
             internal_logs.append(f"Network error fetching series page {pg_num}: {e}"); break
@@ -224,9 +217,9 @@ def get_all_series(_debug_placeholder=None):
              internal_logs.append(f"Unexpected error fetching series page {pg_num}: {e}"); break
 
     if internal_logs: st.warning("get_all_series encountered issues. Check logs.")
-    print(f"DEBUG: get_all_series finished. Total nodes retrieved: {len(nodes)}") # Отладка
-    return nodes
 
+    print(f"DEBUG: get_all_series finished. Total nodes retrieved: {len(nodes)}")
+    return nodes
 def download_series_data(sid, logs, max_ret=3, delay_init=2):
     hdr={"x-api-key":GRID_API_KEY}; url=f"https://api.grid.gg/file-download/end-state/grid/series/{sid}"
     for att in range(max_ret):
