@@ -12,7 +12,6 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 import json
 import os
-from scrims import scrims_page
 from scrims import show_scrims_page
 import scrims# Импорт функции scrims_page из файла scrims.py
 
