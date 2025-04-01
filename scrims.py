@@ -387,25 +387,54 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
             for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S+00:00"):
                 try: date_f = datetime.strptime(date_s.split('+')[0].split('.')[0], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S"); break
                 except ValueError: continue
-        draft_actions = g_data['games'][0].get("draftActions", []); b_bans, r_bans = ["N/A"]*5, ["N/A"]*5;
+        draft_actions = g_data['games'][0].get("draftActions", [])
+        b_bans, r_bans = ["N/A"]*5, ["N/A"]*5 # Инициализируем списки банов
+
         if draft_actions:
-            try: actions_sorted = sorted(draft_actions, key=lambda x: int(x.get("sequenceNumber", 99)))
-            except Exception: actions_sorted = draft_actions
-            bb, rb = 0, 0; processed_ban_seqs = set()
+            try:
+                # Сортируем действия по номеру последовательности
+                actions_sorted = sorted(draft_actions, key=lambda x: int(x.get("sequenceNumber", 99)))
+            except Exception as sort_err:
+                debug_logs.append(f"Warn: Could not sort draftActions for {s_id}: {sort_err}. Processing unsorted.")
+                actions_sorted = draft_actions # Обрабатываем несортированные, если сортировка не удалась
+
+            bb, rb = 0, 0 # Счетчики синих и красных банов
+            processed_ban_seqs = set() # Для отслеживания уже обработанных номеров банов
+
+            # Проходим по отсортированным (или исходным) действиям
             for act in actions_sorted:
-                try: seq = int(act.get("sequenceNumber", -1)); type = act.get("type"); champ = act.get("draftable", {}).get("name", "N/A");
-                    if type == "ban" and champ != "N/A" and seq != -1 and seq not in processed_ban_seqs: processed_ban_seqs.add(seq);
-                         if seq in [1, 3, 5, 14, 16]:
-                              if bb < 5: b_bans[bb] = champ; bb += 1
-                         elif seq in [2, 4, 6, 13, 15]:
-                              if rb < 5: r_bans[rb] = champ; rb += 1
-                except Exception as e: debug_logs.append(f"Warn: Ban processing error for seq {seq} in {s_id}: {e}"); continue
-        draft_picks_ordered = {"B1": "N/A", "R1": "N/A", "R2": "N/A", "B2": "N/A", "B3": "N/A", "R3": "N/A", "R4": "N/A", "B4": "N/A", "B5": "N/A", "R5": "N/A"}; pick_map_seq_to_key = { 7: "B1", 8: "R1", 9: "R2", 10: "B2", 11: "B3", 12: "R3", 17: "R4", 18: "B4", 19: "B5", 20: "R5" }; processed_pick_seqs = set();
-        if draft_actions:
-             for act in actions_sorted:
-                 try: seq = int(act.get("sequenceNumber", -1)); type = act.get("type"); champ = act.get("draftable", {}).get("name", "N/A");
-                     if type == "pick" and champ != "N/A" and seq in pick_map_seq_to_key and seq not in processed_pick_seqs: processed_pick_seqs.add(seq); draft_picks_ordered[pick_map_seq_to_key[seq]] = champ
-                 except Exception as e: debug_logs.append(f"Warn: Pick processing error for seq {seq} in {s_id}: {e}"); continue
+                try:
+                    # Код внутри этого try должен иметь ОДИН уровень отступа от 'try:'
+                    seq_str = act.get("sequenceNumber") # Получаем номер как строку или None
+                    if seq_str is None: continue # Пропускаем, если номера нет
+                    seq = int(seq_str) # Преобразуем в число
+
+                    type = act.get("type")
+                    champ = act.get("draftable", {}).get("name", "N/A")
+
+                    # --- ПРОВЕРЯЕМ ОТСТУП ЗДЕСЬ ---
+                    # Строка 'if type == "ban"...' должна быть на том же уровне отступа,
+                    # что и строки seq = ..., type = ..., champ = ... выше
+                    if type == "ban" and champ != "N/A" and seq != -1 and seq not in processed_ban_seqs:
+                        # Код внутри этого if должен иметь ЕЩЕ ОДИН уровень отступа
+                        processed_ban_seqs.add(seq)
+                        # Определяем, чей бан и какой по счету, на основе стандартной нумерации
+                        if seq in [1, 3, 5, 14, 16]: # Баны синей команды
+                            if bb < 5: # Убедимся, что не выходим за пределы списка
+                                b_bans[bb] = champ
+                                bb += 1
+                        elif seq in [2, 4, 6, 13, 15]: # Баны красной команды
+                            if rb < 5: # Убедимся, что не выходим за пределы списка
+                                r_bans[rb] = champ
+                                rb += 1
+                except (ValueError, TypeError) as parse_err:
+                    # Ловим ошибки преобразования sequenceNumber в int или другие ошибки типа
+                    debug_logs.append(f"Warn: Ban processing error (parse) for action {act.get('id')} in {s_id}: {parse_err}")
+                    continue # Пропускаем это действие
+                except Exception as e:
+                    # Ловим другие возможные ошибки при обработке одного действия
+                    debug_logs.append(f"Warn: Ban processing error for action {act.get('id')} in {s_id}: {e}")
+                    continue
         actual_champs = {"blue": {}, "red": {}};
         for role in ROLE_ORDER_FOR_SHEET: role_short = role.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL"); actual_champs["blue"][role_short] = "N/A"; actual_champs["red"][role_short] = "N/A"
         found_all_our_players = True; our_player_count = 0; processed_teams_gdata = 0
