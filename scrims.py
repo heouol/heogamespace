@@ -303,64 +303,70 @@ def download_game_data(gid, logs, max_ret=3, delay_init=2):
 # (OUR_TEAM_ID, SCRIMS_HEADER, PLAYER_IDS, PLAYER_ROLES_BY_ID, API_REQUEST_DELAY и т.д.)
 
 # --- ИСПРАВЛЕНА: update_scrims_data (Предполагаем структуру g_data без games[0] обертки) ---
+# В файле scrims.py
+
+# --- ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ 2: update_scrims_data (Проверка g_id в s_data, проверка команды в g_data['games'][0]) ---
+# Убедись, что все нужные импорты и КОНСТАНТЫ определены ВЫШЕ
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     """
     Скачивает s_data, проверяет команду по OUR_TEAM_ID в s_data.
-    Ищет g_id в s_data. Если найден, скачивает g_data, ПРОВЕРЯЕТ СТРУКТУРУ g_data
-    (предполагая, что teams находится на верхнем уровне g_data),
+    Ищет g_id в s_data. Если найден, скачивает g_data, ПРОВЕРЯЕТ СТРУКТУРУ g_data['games'][0],
     перепроверяет команду и обрабатывает детально.
     """
-    # Отступ 1 (4 пробела)
-    if not worksheet: st.error("Invalid Worksheet object."); return False
-    if not series_list: st.info("No series found to process."); return False
+    if not worksheet:
+        st.error("Invalid Worksheet object.")
+        return False
+    if not series_list:
+        st.info("No series found to process.")
+        return False
 
     try:
-        # Отступ 2 (8 пробелов)
         existing_data = worksheet.get_all_values()
         existing_ids = set(row[1] for row in existing_data[1:] if len(row) > 1) if len(existing_data) > 1 else set()
     except gspread.exceptions.APIError as api_err:
-        # Отступ 2 (8 пробелов)
-        st.error(f"GSpread API Error reading sheet: {api_err}"); debug_logs.append(f"GSpread Error: {api_err}"); return False
+        st.error(f"GSpread API Error reading sheet: {api_err}")
+        debug_logs.append(f"GSpread Error: {api_err}")
+        return False
     except Exception as e:
-        # Отступ 2 (8 пробелов)
-        st.error(f"Error reading existing sheet data: {e}"); debug_logs.append(f"Read Sheet Error: {e}"); return False
+        st.error(f"Error reading existing sheet data: {e}")
+        debug_logs.append(f"Read Sheet Error: {e}")
+        return False
 
-    # Отступ 1 (4 пробела)
     new_rows = []
+    # Инициализация статистики (включая все счетчики)
     stats = {
         "series_input": len(series_list), "gms_found_in_sdata": 0, "skip_dupes": 0,
         "processed": 0, "skipped_no_g_id": 0, "skipped_gdata_fail": 0,
         "skipped_gdata_struct": 0, "skipped_gdata_teams": 0, "skipped_id_mismatch": 0,
         "skipped_sdata_fail": 0, "skipped_incomplete_map": 0, "skipped_no_teams_sdata": 0,
-        "skipped_our_id_not_found_sdata": 0
+        "skipped_our_id_not_found_sdata": 0, "skipped_final_row_error": 0 # Добавил этот
     }
     total_series = len(series_list)
 
     # --- Начало цикла по сериям ---
-    # Отступ 1 (4 пробела)
     for i, s_summary in enumerate(series_list):
-        # Отступ 2 (8 пробелов)
+        # --- Уровень 1 ---
         s_id = s_summary.get("id")
         if not s_id: continue
 
         prog = (i + 1) / total_series
         try:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 2 ---
             progress_bar.progress(prog, text=f"Checking {i+1}/{total_series} (s:{s_id})")
         except Exception: pass
 
         if i > 0:
-            # Отступ 3 (12 пробелов)
-            time.sleep(API_REQUEST_DELAY) # Используем глобальную константу
+            # --- Уровень 2 ---
+            time.sleep(API_REQUEST_DELAY)
 
         m_id_potential = str(s_summary.get("matchId", s_id))
         if m_id_potential in existing_ids:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 2 ---
             stats["skip_dupes"] += 1
             continue
 
         # 1. Скачиваем s_data
-        # Отступ 2 (8 пробелов)
+        # --- Уровень 2 ---
         s_data = download_series_data(sid=s_id, logs=debug_logs, max_ret=5, delay_init=5)
         if not s_data:
             stats["skipped_sdata_fail"] += 1
@@ -369,12 +375,12 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         # 2. Проверяем команду по OUR_TEAM_ID в s_data.teams
         teams_sdata = s_data.get("teams", [])
         if not teams_sdata:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             series_state_data_for_teams = s_data.get("seriesState", {})
             teams_sdata = series_state_data_for_teams.get("teams", []) if isinstance(series_state_data_for_teams, dict) else []
 
         if not teams_sdata:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             stats["skipped_no_teams_sdata"] += 1
             continue
 
@@ -386,7 +392,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         is_our_scrim_sdata = (OUR_TEAM_ID == t0_id or (t1 and OUR_TEAM_ID == t1_id))
 
         if not is_our_scrim_sdata:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             stats["skipped_our_id_not_found_sdata"] += 1
             continue
         stats["gms_found_in_sdata"] += 1
@@ -395,25 +401,25 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         g_id = None
         series_state_data = s_data.get("seriesState")
         if isinstance(series_state_data, dict):
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             potential_games = series_state_data.get("games", [])
             if isinstance(potential_games, list) and potential_games:
-                # Отступ 4 (16 пробелов)
+                # --- Уровень 4 ---
                 game_info = potential_games[0]
                 g_id = game_info.get("id") if isinstance(game_info, dict) else game_info if isinstance(game_info, str) else None
 
         # Запасной вариант, если в seriesState нет
         if not g_id:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             potential_games_root = s_data.get("games", [])
             if isinstance(potential_games_root, list) and potential_games_root:
-                # Отступ 4 (16 пробелов)
+                # --- Уровень 4 ---
                 game_info = potential_games_root[0]
                 g_id = game_info.get("id") if isinstance(game_info, dict) else game_info if isinstance(game_info, str) else None
 
         # Если g_id НЕ найден нигде, пропускаем
         if not g_id:
-            # Отступ 3 (12 пробелов)
+            # --- Уровень 3 ---
             debug_logs.append(f"Warn: No game ID (g_id) found in s_data (checked paths) for series {s_id}. Skipping.")
             stats["skipped_no_g_id"] += 1
             continue
@@ -428,34 +434,40 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         time.sleep(API_REQUEST_DELAY / 2)
         g_data = download_game_data(gid=g_id, logs=debug_logs, max_ret=5, delay_init=5)
 
-        # 5. !!! ИЗМЕНЕНИЕ: Проверяем структуру g_data НАПРЯМУЮ !!!
-        if not g_data or not isinstance(g_data, dict): # Проверяем что g_data это словарь
-            # Отступ 3 (12 пробелов)
+        # 5. Проверяем структуру g_data, ОЖИДАЯ games[0]
+        if not g_data or not isinstance(g_data, dict):
+            # --- Уровень 3 ---
             debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - g_data is missing or not a dictionary.")
             stats["skipped_gdata_fail"] += 1
             continue
-        # Ищем teams на верхнем уровне g_data
-        if 'teams' not in g_data or not isinstance(g_data.get('teams'), list):
-            # Отступ 3 (12 пробелов)
-            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - 'teams' key missing or not list in g_data.")
+        if 'games' not in g_data or not isinstance(g_data.get('games'), list) or not g_data['games']:
+            # --- Уровень 3 ---
+            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - 'games' key missing/not list/empty in g_data.")
+            stats["skipped_gdata_struct"] += 1
+            continue
+        # Эта строка должна быть с отступом 12 пробелов
+        first_game_data = g_data['games'][0]
+        if not isinstance(first_game_data, dict) or 'teams' not in first_game_data or not isinstance(first_game_data.get('teams'), list):
+            # --- Уровень 3 ---
+            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - 'teams' key missing or not list in g_data['games'][0].")
             stats["skipped_gdata_struct"] += 1
             continue
 
-        game_teams_data = g_data['teams'] # Используем g_data['teams'] напрямую
+        game_teams_data = first_game_data['teams'] # Используем g_data['games'][0]['teams']
         if len(game_teams_data) < 2:
-            # Отступ 3 (12 пробелов)
-            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - Less than 2 teams in g_data['teams']")
+            # --- Уровень 3 ---
+            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - Less than 2 teams in g_data['games'][0]['teams']")
             stats["skipped_gdata_teams"] += 1
             continue
-        # !!! КОНЕЦ ИЗМЕНЕНИЯ СТРУКТУРЫ g_data !!!
+        # --- Конец проверки структуры g_data ---
 
         # 6. Перепроверяем ID нашей команды в g_data (game_teams_data)
         is_our_scrim_gdata = False
         our_team_side = None
         opponent_team_name_gdata = "Opponent"
         blue_team_id_gdata, red_team_id_gdata = None, None
-        for team_state in game_teams_data: # game_teams_data теперь g_data['teams']
-            # Отступ 4 уровня (16 пробелов)
+        for team_state in game_teams_data: # game_teams_data теперь g_data['games'][0]['teams']
+            # --- Уровень 4 ---
             team_id_in_game = str(team_state.get("id", ""))
             team_side = team_state.get("side")
             if team_side == "blue": blue_team_id_gdata = team_id_in_game
@@ -467,8 +479,8 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                  opponent_team_name_gdata = team_state.get("name", "Opponent")
 
         if not is_our_scrim_gdata:
-            # Отступ 3 уровня (12 пробелов)
-            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - Team ID {OUR_TEAM_ID} not found in g_data teams!")
+            # --- Уровень 3 ---
+            debug_logs.append(f"Warn: Skipping s:{s_id}/g:{g_id} - Team ID {OUR_TEAM_ID} found in s_data but MISSING in g_data!")
             stats["skipped_id_mismatch"] += 1
             continue
         # stats["gms_found_in_gdata"] не нужен
@@ -482,119 +494,158 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         date_f = "N/A";
         if s_data: date_s = s_data.get("startTime", s_summary.get("startTimeScheduled", s_data.get("updatedAt")))
         if s_data and date_s and isinstance(date_s, str):
-            # Отступ 3 уровня (12 пробелов)
+            # --- Уровень 3 ---
             for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S+00:00"):
-                try: date_f = datetime.strptime(date_s.split('+')[0].split('.')[0], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S"); break
+                try:
+                    # --- Уровень 4 ---
+                    date_f = datetime.strptime(date_s.split('+')[0].split('.')[0], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                    break
                 except ValueError: continue
 
-        # --- Баны (из g_data) ---
-        draft_actions = g_data.get("draftActions", []) # ИЗМЕНЕН ПУТЬ
+        # --- Баны (из g_data['games'][0]) ---
+        draft_actions = first_game_data.get("draftActions", []) # ИЗМЕНЕН ПУТЬ
         b_bans, r_bans = ["N/A"]*5, ["N/A"]*5;
         if draft_actions:
-            # Отступ 3 уровня (12 пробелов)
+            # --- Уровень 3 ---
             try: actions_sorted = sorted(draft_actions, key=lambda x: int(x.get("sequenceNumber", 99)))
             except Exception: actions_sorted = draft_actions
             bb, rb = 0, 0; processed_ban_seqs = set()
             for act in actions_sorted:
-                # Отступ 4 уровня (16 пробелов)
+                # --- Уровень 4 ---
                 try:
-                    # Отступ 5 уровней (20 пробелов)
+                    # --- Уровень 5 ---
                     seq_str = act.get("sequenceNumber")
-                    if seq_str is None: continue
+                    if seq_str is None: continue # Упрощенная проверка
                     seq = int(seq_str)
                     type = act.get("type"); champ = act.get("draftable", {}).get("name", "N/A");
                     if type == "ban" and champ != "N/A" and seq != -1 and seq not in processed_ban_seqs:
-                        # Отступ 6 уровней (24 пробела)
+                        # --- Уровень 6 ---
                         processed_ban_seqs.add(seq);
                         if seq in [1, 3, 5, 14, 16]:
-                            # Отступ 7 уровней (28 пробелов)
+                            # --- Уровень 7 ---
                             if bb < 5: b_bans[bb] = champ; bb += 1
                         elif seq in [2, 4, 6, 13, 15]:
-                            # Отступ 7 уровней (28 пробелов)
+                            # --- Уровень 7 ---
                             if rb < 5: r_bans[rb] = champ; rb += 1
                 except (ValueError, TypeError) as parse_err:
-                    # Отступ 5 уровней (20 пробелов)
+                    # --- Уровень 5 ---
                     debug_logs.append(f"Warn: Ban parse error seq {seq_str} in {s_id}: {parse_err}"); continue
                 except Exception as e:
-                    # Отступ 5 уровней (20 пробелов)
+                    # --- Уровень 5 ---
                     debug_logs.append(f"Warn: Ban proc. error action {act.get('id')} in {s_id}: {e}"); continue
 
-        # --- Пики драфта (из g_data) ---
+        # --- Пики драфта (из g_data['games'][0]) ---
         draft_picks_ordered = {"B1": "N/A", "R1": "N/A", "R2": "N/A", "B2": "N/A", "B3": "N/A", "R3": "N/A", "R4": "N/A", "B4": "N/A", "B5": "N/A", "R5": "N/A"}
         pick_map_seq_to_key = { 7: "B1", 8: "R1", 9: "R2", 10: "B2", 11: "B3", 12: "R3", 17: "R4", 18: "B4", 19: "B5", 20: "R5" }
         processed_pick_seqs = set();
         if draft_actions:
-             # Отступ 3 уровня (12 пробелов)
+             # --- Уровень 3 ---
              for act in actions_sorted:
-                 # Отступ 4 уровня (16 пробелов)
+                 # --- Уровень 4 ---
                  try:
-                     # Отступ 5 уровней (20 пробелов)
+                     # --- Уровень 5 ---
                      seq_str = act.get("sequenceNumber");
                      if seq_str is None: continue
                      seq = int(seq_str);
                      type = act.get("type"); champ = act.get("draftable", {}).get("name", "N/A");
                      if type == "pick" and champ != "N/A" and seq in pick_map_seq_to_key and seq not in processed_pick_seqs:
-                         # Отступ 6 уровней (24 пробела)
+                         # --- Уровень 6 ---
                          processed_pick_seqs.add(seq); draft_picks_ordered[pick_map_seq_to_key[seq]] = champ
                  except (ValueError, TypeError) as parse_err:
-                     # Отступ 5 уровней (20 пробелов)
+                     # --- Уровень 5 ---
                      debug_logs.append(f"Warn: Pick parse error seq {seq_str} in {s_id}: {parse_err}"); continue
                  except Exception as e:
-                     # Отступ 5 уровней (20 пробелов)
+                     # --- Уровень 5 ---
                      debug_logs.append(f"Warn: Pick proc. error action {act.get('id')} in {s_id}: {e}"); continue
 
-        # --- Фактические чемпионы по ролям (из g_data['teams']) ---
+        # --- Фактические чемпионы по ролям (из g_data['games'][0]['teams']) ---
         actual_champs = {"blue": {}, "red": {}};
         for role in ROLE_ORDER_FOR_SHEET:
-            # Отступ 3 уровня (12 пробелов)
+            # --- Уровень 3 ---
             role_short = role.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
             actual_champs["blue"][role_short] = "N/A"
             actual_champs["red"][role_short] = "N/A"
         found_all_our_players = True; our_player_count = 0; processed_teams_gdata = 0
         # Пере-обрабатываем game_teams_data для извлечения фактических чемпионов
-        for team_state in game_teams_data: # game_teams_data теперь g_data['teams']
-            # Отступ 3 уровня (12 пробелов)
-            processed_teams_gdata += 1; team_id_in_game = str(team_state.get("id", "")); is_our_team_in_game = (team_id_in_game == OUR_TEAM_ID); team_side = team_state.get("side");
+        # --- Уровень 2 ---
+        for team_state in game_teams_data: # game_teams_data это g_data['games'][0]['teams']
+            # --- Уровень 3 ---
+            processed_teams_gdata += 1
+            team_id_in_game = str(team_state.get("id", ""))
+            is_our_team_in_game = (team_id_in_game == OUR_TEAM_ID)
+            team_side = team_state.get("side")
             if team_side not in ["blue", "red"]: continue
-            target_champ_dict = actual_champs[team_side]; players_list = team_state.get("players", [])
+
+            target_champ_dict = actual_champs[team_side]
+            players_list = team_state.get("players", [])
+
+            # --- Блок if is_our_team_in_game ---
             if is_our_team_in_game:
-                # Отступ 4 уровня (16 пробелов)
-                player_champion_map = {}; current_team_player_ids = set()
+                # --- Уровень 4 ---
+                player_champion_map = {}
+                current_team_player_ids = set()
+                # --- Начало цикла по игрокам нашей команды ---
                 for player_state in players_list:
-                    # Отступ 5 уровней (20 пробелов)
-                    player_id = str(player_state.get("id", "")); champion_name = player_state.get("character", {}).get("name", "N/A");
+                    # --- Уровень 5 ---
+                    player_id = str(player_state.get("id", ""))
+                    champion_name = player_state.get("character", {}).get("name", "N/A")
+                    # --- Уровень 5 ---
                     if player_id in PLAYER_IDS:
-                        # Отступ 6 уровней (24 пробела)
-                        player_champion_map[player_id] = champion_name; current_team_player_ids.add(player_id)
+                        # --- Уровень 6 ---
+                        player_champion_map[player_id] = champion_name
+                        current_team_player_ids.add(player_id)
+                # --- Конец цикла по игрокам нашей команды ---
+                # --- Уровень 4 ---
                 our_player_count = len(current_team_player_ids)
+
+                # Распределение по ролям
+                # --- Уровень 4 ---
                 for p_id, role_full in PLAYER_ROLES_BY_ID.items():
-                    # Отступ 5 уровней (20 пробелов)
+                    # --- Уровень 5 ---
                     role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
                     if role_short in target_champ_dict:
-                        # Отступ 6 уровней (24 пробела)
-                        champion = player_champion_map.get(p_id, "N/A"); target_champ_dict[role_short] = champion;
-                        if p_id not in current_team_player_ids or champion == "N/A": found_all_our_players = False
+                        # --- Уровень 6 ---
+                        champion = player_champion_map.get(p_id, "N/A")
+                        target_champ_dict[role_short] = champion
+                        if p_id not in current_team_player_ids or champion == "N/A":
+                            # --- Уровень 7 ---
+                            found_all_our_players = False
+            # --- Конец блока if is_our_team_in_game ---
             else: # Команда противника
-                # Отступ 4 уровня (16 пробелов)
+                # --- Уровень 4 ---
                 opponent_team_name = team_state.get("name", "N/A")
                 if len(players_list) >= 5:
-                    # Отступ 5 уровней (20 пробелов)
+                    # --- Уровень 5 ---
                     for i, player_state in enumerate(players_list[:5]):
-                        # Отступ 6 уровней (24 пробела)
-                        role_full = ROLE_ORDER_FOR_SHEET[i]; role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL"); champion_name = player_state.get("character", {}).get("name", "N/A");
-                        if role_short in target_champ_dict: target_champ_dict[role_short] = champion_name
-                else: debug_logs.append(f"Warn: Opponent team ({opponent_team_name}) has {len(players_list)} players in g_data for {s_id}.")
+                        # --- Уровень 6 ---
+                        role_full = ROLE_ORDER_FOR_SHEET[i]
+                        role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
+                        champion_name = player_state.get("character", {}).get("name", "N/A")
+                        if role_short in target_champ_dict:
+                            # --- Уровень 7 ---
+                            target_champ_dict[role_short] = champion_name
+                else:
+                    # --- Уровень 5 ---
+                    debug_logs.append(f"Warn: Opponent team ({opponent_team_name}) has {len(players_list)} players in g_data for {s_id}.")
+            # --- Конец блока else ---
+        # --- Конец цикла по командам в g_data ---
+
 
         # Проверка полноты данных нашей команды
         if not found_all_our_players or our_player_count < 5 or processed_teams_gdata < 2:
-             details = f"Our players found: {our_player_count}/5. All mapped: {found_all_our_players}. Teams in g_data: {processed_teams_gdata}."; debug_logs.append(f"Warn: Skipping {s_id} - Incomplete final mapping. {details}"); stats["skipped_incomplete_map"] += 1; continue
+             details = f"Our players found: {our_player_count}/5. All mapped: {found_all_our_players}. Teams in g_data: {processed_teams_gdata}."
+             debug_logs.append(f"Warn: Skipping {s_id} - Incomplete final mapping. {details}")
+             stats["skipped_incomplete_map"] += 1
+             continue
 
-        # Результат и длительность - ИЗМЕНЕН ПУТЬ к duration
-        duration_s = g_data.get("clock", {}).get("currentSeconds") # Берем clock из g_data напрямую
+        # Результат и длительность - Используем clock из first_game_data
+        duration_s = first_game_data.get("clock", {}).get("currentSeconds")
         duration_f = "N/A";
-        if isinstance(duration_s, (int, float)) and duration_s >= 0: minutes, seconds = divmod(int(duration_s), 60); duration_f = f"{minutes}:{seconds:02d}"
+        if isinstance(duration_s, (int, float)) and duration_s >= 0:
+            minutes, seconds = divmod(int(duration_s), 60)
+            duration_f = f"{minutes}:{seconds:02d}"
         res = "N/A";
-        # Определяем результат по g_data['teams']
+        # Определяем результат по g_data['games'][0]['teams']
         for team_state in game_teams_data:
              if str(team_state.get("id","")) == OUR_TEAM_ID:
                   if team_state.get("won") is True: res = "Win"; break
@@ -609,50 +660,78 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         # Формирование строки
         try:
             # Отступ 3 уровня (12 пробелов)
-            new_row_data = [ date_f, m_id, b_team_name, r_team_name, *b_bans, *r_bans, draft_picks_ordered["B1"], draft_picks_ordered["R1"], draft_picks_ordered["R2"], draft_picks_ordered["B2"], draft_picks_ordered["B3"], draft_picks_ordered["R3"], draft_picks_ordered["R4"], draft_picks_ordered["B4"], draft_picks_ordered["B5"], draft_picks_ordered["R5"], actual_champs["blue"]["TOP"], actual_champs["blue"]["JGL"], actual_champs["blue"]["MID"], actual_champs["blue"]["BOT"], actual_champs["blue"]["SUP"], actual_champs["red"]["TOP"], actual_champs["red"]["JGL"], actual_champs["red"]["MID"], actual_champs["red"]["BOT"], actual_champs["red"]["SUP"], duration_f, res ];
-            if len(new_row_data) != len(SCRIMS_HEADER): raise ValueError(f"Row length mismatch")
-            new_rows.append(new_row_data); existing_ids.add(m_id); stats["processed"] += 1
+            new_row_data = [
+                date_f, m_id, b_team_name, r_team_name, *b_bans, *r_bans,
+                draft_picks_ordered["B1"], draft_picks_ordered["R1"], draft_picks_ordered["R2"],
+                draft_picks_ordered["B2"], draft_picks_ordered["B3"], draft_picks_ordered["R3"],
+                draft_picks_ordered["R4"], draft_picks_ordered["B4"], draft_picks_ordered["B5"], draft_picks_ordered["R5"],
+                actual_champs["blue"]["TOP"], actual_champs["blue"]["JGL"], actual_champs["blue"]["MID"], actual_champs["blue"]["BOT"], actual_champs["blue"]["SUP"],
+                actual_champs["red"]["TOP"], actual_champs["red"]["JGL"], actual_champs["red"]["MID"], actual_champs["red"]["BOT"], actual_champs["red"]["SUP"],
+                duration_f, res
+            ]
+            if len(new_row_data) != len(SCRIMS_HEADER):
+                raise ValueError(f"Row length mismatch: expected {len(SCRIMS_HEADER)}, got {len(new_row_data)}")
+            new_rows.append(new_row_data)
+            existing_ids.add(m_id) # Добавляем ID в обработанные
+            stats["processed"] += 1
         except (KeyError, ValueError) as row_err:
             # Отступ 3 уровня (12 пробелов)
-            debug_logs.append(f"Error: Constructing row failed for {s_id}: {row_err}."); stats["skipped_incomplete_map"] += 1; continue
+            debug_logs.append(f"Error: Constructing row failed for {s_id}: {row_err}.")
+            stats["skipped_incomplete_map"] += 1
+            continue
     # --- Конец цикла for по series_list ---
 
     # --- Код для вывода Summary и добавления строк в таблицу ---
     # Отступ 1 уровня (4 пробела)
     progress_bar.progress(1.0, text="Update complete. Checking results...")
-    summary = [ f"\n--- Update Summary ---", f"Input Series: {stats['series_input']}", f"Our Scrims Found (by ID {OUR_TEAM_ID} in s_data): {stats['gms_found_in_sdata']}", f"Skipped (Our ID not in s_data): {stats['skipped_our_id_not_found_sdata']}", f"Skipped (Already Exists): {stats['skip_dupes']}", f"Skipped (No g_id in s_data): {stats['skipped_no_g_id']}", f"Skipped (g_data fail/struct/teams): {stats['skipped_gdata_fail'] + stats['skipped_gdata_struct'] + stats['skipped_gdata_teams']}", f"Skipped (ID mismatch s_data/g_data): {stats['skipped_id_mismatch']}", f"Skipped (s_data fail for found scrim): {stats['skipped_sdata_fail']}", f"Skipped (Incomplete Map/Row): {stats['skipped_incomplete_map']}", f"Processed Successfully: {stats['processed']}", f"New Records Added: {len(new_rows)}" ]
+    summary = [
+        f"\n--- Update Summary ---", f"Input Series: {stats['series_input']}",
+        f"Our Scrims Found (by ID {OUR_TEAM_ID} in s_data): {stats['gms_found_in_sdata']}",
+        f"Skipped (Our ID not in s_data): {stats['skipped_our_id_not_found_sdata']}",
+        f"Skipped (Already Exists): {stats['skip_dupes']}",
+        f"Skipped (No g_id in s_data): {stats['skipped_no_g_id']}",
+        f"Skipped (g_data fail/struct/teams): {stats['skipped_gdata_fail'] + stats['skipped_gdata_struct'] + stats['skipped_gdata_teams']}",
+        f"Skipped (ID mismatch s_data/g_data): {stats['skipped_id_mismatch']}",
+        f"Skipped (s_data fail for found scrim): {stats['skipped_sdata_fail']}",
+        f"Skipped (Incomplete Map/Row): {stats['skipped_incomplete_map']}",
+        f"Processed Successfully: {stats['processed']}", f"New Records Added: {len(new_rows)}"
+    ]
     if 'scrims_update_logs' not in st.session_state: st.session_state.scrims_update_logs = []
     st.session_state.scrims_update_logs = st.session_state.scrims_update_logs[-50:] + debug_logs[-20:] + summary
-    st.code("\n".join(summary), language=None)
+
+    st.code("\n".join(summary), language=None) # Показываем summary
 
     if new_rows:
         # Отступ 2 уровня (8 пробелов)
         try:
             # Отступ 3 уровня (12 пробелов)
-            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED'); st.success(f"Added {len(new_rows)} new records to '{worksheet.title}'.")
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
+            st.success(f"Added {len(new_rows)} new records to '{worksheet.title}'.")
             try:
                 # Отступ 4 уровня (16 пробелов)
                 aggregate_scrims_data.clear(); # Очищаем кэш после добавления
             except AttributeError: pass
-            return True # Отступ 3 уровня (12 пробелов)
+            # Отступ 3 уровня (12 пробелов)
+            return True
         except gspread.exceptions.APIError as api_err:
             # Отступ 3 уровня (12 пробелов)
             error_msg = f"GSpread API Error appending rows: {api_err}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows.")
-            return False # Отступ 3 уровня (12 пробелов)
+            return False
         except Exception as e:
             # Отступ 3 уровня (12 пробелов)
             error_msg = f"Error appending rows: {e}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows.")
-            return False # Отступ 3 уровня (12 пробелов)
+            return False
     else:
         # Отступ 2 уровня (8 пробелов)
         st.info("No new valid records found to add.")
         if stats['gms_found_in_sdata'] > 0 and stats['processed'] == 0:
              # Отступ 3 уровня (12 пробелов)
-             st.warning(f"Found {stats['gms_found_in_sdata']} potential scrims for ID {OUR_TEAM_ID} in s_data, but could not process them. Check logs for g_data structure/teams warnings or ID mismatch.")
+             st.warning(f"Found {stats['gms_found_in_sdata']} potential scrims for ID {OUR_TEAM_ID} in s_data, but could not process them (likely missing g_id or failed g_data checks). Check logs.")
         elif stats['gms_found_in_sdata'] == 0:
              # Отступ 3 уровня (12 пробелов)
              st.warning(f"No series found containing Team ID {OUR_TEAM_ID} in s_data. Verify filters or data availability.")
-        return False # Отступ 2 уровня (8 пробелов)
+        # Отступ 2 уровня (8 пробелов)
+        return False
 # --- Конец функции update_scrims_data ---
 # --- ВОССТАНОВЛЕННАЯ: aggregate_scrims_data (читает Actual_, без кэша) ---
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
