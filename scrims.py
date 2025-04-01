@@ -304,11 +304,11 @@ def download_game_data(gid, logs, max_ret=3, delay_init=2):
 # --- ИСПРАВЛЕННАЯ: update_scrims_data ---
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     """
-    Скачивает данные с GRID API, идентифицируя команду по OUR_TEAM_ID,
-    обрабатывает их и добавляет новые строки в Google Sheet.
+    Скачивает данные с GRID API, обрабатывает их и добавляет новые строки.
+    Идентификация команды происходит по OUR_TEAM_ID в данных игры (g_data).
     """
     if not worksheet:
-        st.error("Invalid Worksheet object provided to update_scrims_data.")
+        st.error("Invalid Worksheet object provided.")
         return False
     if not series_list:
         st.info("No series found to process.")
@@ -327,130 +327,107 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
         return False
 
     new_rows = []
-    stats = {"gms_count": 0, "skip_dupes": 0, "processed": 0, "skipped_no_game_data": 0, "skipped_incomplete_map": 0, "skipped_no_teams_sdata": 0}
+    stats = {"gms_count": 0, "skip_dupes": 0, "processed": 0, "skipped_no_game_data": 0, "skipped_incomplete_map": 0, "skipped_no_teams_gdata": 0, "skipped_our_id_not_found": 0}
     total_series = len(series_list)
-    processed_count_for_debug = 0
+    # Убедись, что API_REQUEST_DELAY определена где-то выше
+    # API_REQUEST_DELAY = 1.0 # Например
 
     for i, s_summary in enumerate(series_list):
         s_id = s_summary.get("id")
         if not s_id: continue
 
         prog = (i + 1) / total_series
-        try:
-            progress_bar.progress(prog, text=f"Processing {i+1}/{total_series} ({s_id})")
+        try: progress_bar.progress(prog, text=f"Processing {i+1}/{total_series} ({s_id})")
         except Exception: pass
 
-        if i > 0:
-            time.sleep(API_REQUEST_DELAY)
+        if i > 0: time.sleep(API_REQUEST_DELAY)
 
         m_id_potential = str(s_summary.get("matchId", s_id))
         if m_id_potential in existing_ids:
-             stats["skip_dupes"] += 1
-             continue
+             stats["skip_dupes"] += 1; continue
 
+        # 1. Скачиваем s_data (для даты, ID игры и имен команд)
         s_data = download_series_data(sid=s_id, logs=debug_logs, max_ret=5, delay_init=5)
-        if not s_data: continue
+        if not s_data: continue # Ошибки скачивания логируются внутри
 
-        teams = s_data.get("teams")
-
-        # Отладка содержимого teams (ограничено первыми 10)
-        if processed_count_for_debug < 10:
-            # Используем pprint для более читаемого вывода словарей/списков, если доступен
-            try:
-                import pprint
-                teams_str = pprint.pformat(teams)
-            except ImportError:
-                teams_str = json.dumps(teams, indent=2) # Запасной вариант с JSON
-            print(f"\n--- DEBUG: s_data['teams'] content for Series ID: {s_id} ---")
-            print(teams_str)
-            print(f"------------------------------------------------------------")
-            processed_count_for_debug += 1
-
-        # Гибкая проверка списка teams
-        if not teams:
-            debug_logs.append(f"Warn: Skipping {s_id} - No 'teams' list in series data.")
-            stats["skipped_no_teams_sdata"] += 1
-            continue
-
-        # Пытаемся получить данные команд
-        t0 = teams[0] if len(teams) > 0 else None
-        t1 = teams[1] if len(teams) > 1 else None
-
-        # Пропускаем, если нет даже первой команды
-        if not t0:
-            debug_logs.append(f"Warn: Skipping {s_id} - Empty 'teams' list in series data.")
-            stats["skipped_no_teams_sdata"] += 1
-            continue
-
-        t0_id = t0.get("id")
-        t1_id = t1.get("id") if t1 else None
-        t0_n = t0.get("name", "N/A")
-        t1_n = t1.get("name", "N/A") if t1 else "N/A"
-
-        # Проверка по ID команды
-        is_our_scrim = (OUR_TEAM_ID == str(t0_id) or (t1 and OUR_TEAM_ID == str(t1_id))) # Сравниваем как строки
-
-        if not is_our_scrim:
-             continue
-        stats["gms_count"] += 1
-
-        if not t1:
-             debug_logs.append(f"Info: Found our team ID {OUR_TEAM_ID} in {s_id}, but only one team listed in series data. Proceeding to check game data.")
-
-        m_id = str(s_data.get("matchId", s_id))
-        if m_id in existing_ids:
-            stats["skip_dupes"] += 1
-            continue
-
-        # Скачивание g_data
-        g_id, g_data = None, None
+        # Извлекаем ID игры из s_data
+        g_id = None
         potential_games = s_data.get("games", []) or (s_data.get("object", {}).get("games") if isinstance(s_data.get("object"), dict) else [])
         if isinstance(potential_games, list) and potential_games:
-             game_info = potential_games[0]
-             g_id = game_info.get("id") if isinstance(game_info, dict) else game_info if isinstance(game_info, str) else None
+             game_info = potential_games[0]; g_id = game_info.get("id") if isinstance(game_info, dict) else game_info if isinstance(game_info, str) else None
 
-        if g_id:
-            time.sleep(API_REQUEST_DELAY / 2)
-            g_data = download_game_data(gid=g_id, logs=debug_logs, max_ret=5, delay_init=5)
-        else:
-             debug_logs.append(f"Warn: No game ID found for series {s_id} (Our Team Match by ID)")
-             stats["skipped_no_game_data"] += 1
-             continue
+        if not g_id:
+             debug_logs.append(f"Warn: No game ID (g_id) found in s_data for series {s_id}")
+             stats["skipped_no_game_data"] += 1; continue
 
-        if not g_data or 'games' not in g_data or not g_data['games'] or 'teams' not in g_data['games'][0]:
-            debug_logs.append(f"Warn: Skipping {s_id} (GameID: {g_id}) - Missing g_data structure (Our Team Match by ID)")
-            stats["skipped_no_game_data"] += 1
-            continue
+        # 2. Скачиваем g_data (для проверки команд и детальной информации)
+        time.sleep(API_REQUEST_DELAY / 2)
+        g_data = download_game_data(gid=g_id, logs=debug_logs, max_ret=5, delay_init=5)
 
-        # --- Извлечение базовой информации ---
-        date_f = "N/A"
-        date_s = s_data.get("startTime", s_summary.get("startTimeScheduled", s_data.get("updatedAt")))
+        # Проверяем структуру g_data
+        if not g_data or 'games' not in g_data or not g_data['games'] or 'teams' not in g_data['games'][0] or not isinstance(g_data['games'][0]['teams'], list):
+            debug_logs.append(f"Warn: Skipping {s_id} (GameID: {g_id}) - Missing critical g_data structure (games[0].teams)")
+            stats["skipped_no_game_data"] += 1; continue
+
+        game_teams_data = g_data['games'][0]['teams']
+        if len(game_teams_data) < 2:
+             debug_logs.append(f"Warn: Skipping {s_id} (GameID: {g_id}) - Less than 2 teams in g_data['games'][0]['teams']")
+             stats["skipped_no_teams_gdata"] += 1; continue
+
+        # 3. !!! ПРОВЕРКА ID КОМАНДЫ ИМЕННО В g_data !!!
+        is_our_scrim = False
+        our_team_side = None # Определим сторону нашей команды
+        opponent_team_name_gdata = "Opponent" # Имя по умолчанию для оппонента
+        blue_team_id_gdata, red_team_id_gdata = None, None
+
+        for team_state in game_teams_data:
+            team_id_in_game = str(team_state.get("id", ""))
+            team_side = team_state.get("side")
+
+            if team_side == "blue": blue_team_id_gdata = team_id_in_game
+            elif team_side == "red": red_team_id_gdata = team_id_in_game
+
+            if team_id_in_game == OUR_TEAM_ID:
+                is_our_scrim = True
+                our_team_side = team_side # Запоминаем сторону нашей команды
+            else:
+                 # Запоминаем имя оппонента из g_data, если это возможно
+                 opponent_team_name_gdata = team_state.get("name", "Opponent")
+
+        if not is_our_scrim:
+            # debug_logs.append(f"Debug: Skipping {s_id} - Our ID {OUR_TEAM_ID} not found in g_data teams ('{blue_team_id_gdata}', '{red_team_id_gdata}').")
+            stats["skipped_our_id_not_found"] += 1
+            continue # Пропускаем, если наш ID не найден в данных игры
+
+        # Если дошли сюда, значит это наш скрим
+        stats["gms_count"] += 1
+
+        # Получаем имена команд из s_data (для записи в таблицу, могут отличаться от имен в g_data)
+        s_teams = s_data.get("teams", [])
+        s_t0 = s_teams[0] if len(s_teams) > 0 else {}
+        s_t1 = s_teams[1] if len(s_teams) > 1 else {}
+        s_t0_id = str(s_t0.get("id",""))
+        s_t1_id = str(s_t1.get("id","")) if s_t1 else ""
+
+        # Определяем Blue/Red имена для записи, основываясь на ID из g_data
+        b_team_name = s_t0.get("name", "Blue Team") if s_t0_id == blue_team_id_gdata else s_t1.get("name", "Blue Team") if s_t1_id == blue_team_id_gdata else opponent_team_name_gdata if our_team_side == 'red' else TEAM_NAME
+        r_team_name = s_t1.get("name", "Red Team") if s_t1_id == red_team_id_gdata else s_t0.get("name", "Red Team") if s_t0_id == red_team_id_gdata else opponent_team_name_gdata if our_team_side == 'blue' else TEAM_NAME
+
+
+        m_id = str(s_data.get("matchId", s_id)) # Match ID для записи
+        if m_id in existing_ids: stats["skip_dupes"] += 1; continue # Финальная проверка дубликата
+
+        # --- Извлечение остальной информации (Дата, Баны, Пики драфта, Факт. чемпионы) ---
+        date_f = "N/A"; date_s = s_data.get("startTime", s_summary.get("startTimeScheduled", s_data.get("updatedAt")))
+        # ... (Логика парсинга даты date_f как раньше) ...
         if date_s and isinstance(date_s, str):
             for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%dT%H:%M:%S+00:00"):
-                try:
-                    date_f = datetime.strptime(date_s.split('+')[0].split('.')[0], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S") # Убираем мс и таймзону
-                    break
+                try: date_f = datetime.strptime(date_s.split('+')[0].split('.')[0], "%Y-%m-%dT%H:%M:%S").strftime("%Y-%m-%d %H:%M:%S"); break
                 except ValueError: continue
-        # Определяем имена команд Blue/Red по порядку в s_data (если есть обе команды)
-        blue_team_name, red_team_name = "N/A", "N/A"
-        if len(s_data.get("teams", [])) >= 2:
-             blue_team_name = s_data["teams"][0].get("name", "N/A")
-             red_team_name = s_data["teams"][1].get("name", "N/A")
-        elif len(s_data.get("teams", [])) == 1:
-             # Если только одна команда, пытаемся определить сторону из g_data
-             game_teams_temp = g_data['games'][0]['teams']
-             for team_state_temp in game_teams_temp:
-                 if team_state_temp.get("id") == OUR_TEAM_ID:
-                     if team_state_temp.get("side") == "blue": blue_team_name = TEAM_NAME; red_team_name = "Opponent"
-                     else: red_team_name = TEAM_NAME; blue_team_name = "Opponent"
-                     break
-             if blue_team_name == "N/A": # Если не нашли нашу, берем что есть
-                  blue_team_name = s_data["teams"][0].get("name", "N/A")
 
-
-        # --- Извлечение Банов ---
         draft_actions = g_data['games'][0].get("draftActions", [])
         b_bans, r_bans = ["N/A"]*5, ["N/A"]*5;
+        # ... (Логика парсинга банов b_bans, r_bans из draft_actions как раньше) ...
         if draft_actions:
             try: actions_sorted = sorted(draft_actions, key=lambda x: int(x.get("sequenceNumber", 99)))
             except Exception: actions_sorted = draft_actions
@@ -459,17 +436,17 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                 try:
                     seq = int(act.get("sequenceNumber", -1)); type = act.get("type"); champ = act.get("draftable", {}).get("name", "N/A")
                     if type == "ban" and champ != "N/A" and seq != -1 and seq not in processed_ban_seqs:
-                         processed_ban_seqs.add(seq)
+                         processed_ban_seqs.add(seq);
                          if seq in [1, 3, 5, 14, 16]:
                               if bb < 5: b_bans[bb] = champ; bb += 1
                          elif seq in [2, 4, 6, 13, 15]:
                               if rb < 5: r_bans[rb] = champ; rb += 1
                 except Exception as e: debug_logs.append(f"Warn: Ban processing error for seq {seq} in {s_id}: {e}"); continue
 
-        # --- Извлечение пиков по порядку драфта ---
         draft_picks_ordered = {"B1": "N/A", "R1": "N/A", "R2": "N/A", "B2": "N/A", "B3": "N/A", "R3": "N/A", "R4": "N/A", "B4": "N/A", "B5": "N/A", "R5": "N/A"}
         pick_map_seq_to_key = { 7: "B1", 8: "R1", 9: "R2", 10: "B2", 11: "B3", 12: "R3", 17: "R4", 18: "B4", 19: "B5", 20: "R5" }
         processed_pick_seqs = set();
+        # ... (Логика парсинга пиков драфта draft_picks_ordered из draft_actions как раньше) ...
         if draft_actions:
              for act in actions_sorted:
                  try:
@@ -478,142 +455,99 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
                           processed_pick_seqs.add(seq); draft_picks_ordered[pick_map_seq_to_key[seq]] = champ
                  except Exception as e: debug_logs.append(f"Warn: Pick processing error for seq {seq} in {s_id}: {e}"); continue
 
-        # --- Извлечение фактических данных игрок-чемпион по ролям ---
         actual_champs = {"blue": {}, "red": {}}
-        for role in ROLE_ORDER_FOR_SHEET:
-             role_short = role.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
-             actual_champs["blue"][role_short] = "N/A"
-             actual_champs["red"][role_short] = "N/A"
+        for role in ROLE_ORDER_FOR_SHEET: role_short = role.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL"); actual_champs["blue"][role_short] = "N/A"; actual_champs["red"][role_short] = "N/A"
+        found_all_our_players = True; our_player_count = 0; processed_teams_gdata = 0
 
-        game_teams_data = g_data['games'][0]['teams']
-        found_all_our_players = True
-        our_player_count = 0
-        processed_teams = 0
-
-        # --- Начало цикла по командам в данных игры ---
-        for team_state in game_teams_data:
-            processed_teams += 1
-            team_id_in_game = str(team_state.get("id", "")) # Приводим ID к строке для сравнения
+        # Пере-обрабатываем game_teams_data для извлечения фактических чемпионов
+        for team_state in game_teams_data: # game_teams_data уже извлечена из g_data
+            processed_teams_gdata += 1
+            team_id_in_game = str(team_state.get("id", ""))
             is_our_team_in_game = (team_id_in_game == OUR_TEAM_ID)
             team_side = team_state.get("side")
-            if team_side not in ["blue", "red"]:
-                debug_logs.append(f"Warn: Unknown side '{team_side}' for team {team_id_in_game} in {s_id}")
-                continue
+            if team_side not in ["blue", "red"]: continue
 
             target_champ_dict = actual_champs[team_side]
             players_list = team_state.get("players", [])
 
-            # --- Начало блока if is_our_team_in_game ---
             if is_our_team_in_game:
-                player_champion_map = {}
-                current_team_player_ids = set()
-                # --- Начало цикла по игрокам нашей команды ---
+                player_champion_map = {}; current_team_player_ids = set()
                 for player_state in players_list:
-                    player_id = str(player_state.get("id", "")) # ID игрока как строка
+                    player_id = str(player_state.get("id", ""))
                     champion_name = player_state.get("character", {}).get("name", "N/A")
-                    # Проверяем, наш ли это игрок по ID (сравнение строк)
-                    if player_id in PLAYER_IDS:
-                        player_champion_map[player_id] = champion_name
-                        current_team_player_ids.add(player_id)
-                # --- Конец цикла по игрокам нашей команды ---
+                    if player_id in PLAYER_IDS: player_champion_map[player_id] = champion_name; current_team_player_ids.add(player_id)
                 our_player_count = len(current_team_player_ids)
-
-                # Распределение по ролям
                 for p_id, role_full in PLAYER_ROLES_BY_ID.items():
                     role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
                     if role_short in target_champ_dict:
-                        champion = player_champion_map.get(p_id, "N/A") # p_id уже строка из PLAYER_IDS/PLAYER_ROLES_BY_ID
+                        champion = player_champion_map.get(p_id, "N/A")
                         target_champ_dict[role_short] = champion
-                        if p_id not in current_team_player_ids or champion == "N/A":
-                            found_all_our_players = False
-            # --- Конец блока if is_our_team_in_game ---
+                        if p_id not in current_team_player_ids or champion == "N/A": found_all_our_players = False
             else: # Команда противника
                 opponent_team_name = team_state.get("name", "N/A")
                 if len(players_list) >= 5:
                     for i, player_state in enumerate(players_list[:5]):
-                        role_full = ROLE_ORDER_FOR_SHEET[i]
-                        role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
+                        role_full = ROLE_ORDER_FOR_SHEET[i]; role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
                         champion_name = player_state.get("character", {}).get("name", "N/A")
-                        if role_short in target_champ_dict:
-                            target_champ_dict[role_short] = champion_name
-                else:
-                    debug_logs.append(f"Warn: Opponent team ({opponent_team_name}) has {len(players_list)} players in g_data for {s_id}.")
-        # --- Конец цикла по командам в данных игры ---
+                        if role_short in target_champ_dict: target_champ_dict[role_short] = champion_name
+                else: debug_logs.append(f"Warn: Opponent team ({opponent_team_name}) has {len(players_list)} players in g_data for {s_id}.")
+
+        # Проверка полноты данных нашей команды
+        if not found_all_our_players or our_player_count < 5 or processed_teams_gdata < 2:
+            details = f"Our players found: {our_player_count}/5. All mapped: {found_all_our_players}. Teams in g_data: {processed_teams_gdata}."
+            debug_logs.append(f"Warn: Skipping {s_id} - Incomplete final mapping. {details}")
+            stats["skipped_incomplete_map"] += 1; continue
+
+        # Результат и длительность
+        duration_s = g_data['games'][0].get("clock", {}).get("currentSeconds"); duration_f = "N/A";
+        if isinstance(duration_s, (int, float)) and duration_s >= 0: minutes, seconds = divmod(int(duration_s), 60); duration_f = f"{minutes}:{seconds:02d}"
+        # Определяем результат на основе 'won' в g_data для нашей команды
+        res = "N/A"
+        for team_state in game_teams_data:
+            if str(team_state.get("id","")) == OUR_TEAM_ID:
+                 if team_state.get("won") is True: res = "Win"
+                 elif team_state.get("won") is False: res = "Loss"
+                 break # Нашли нашу команду, выходим
+        if res == "N/A": # Если вдруг 'won' не было, попробуем по s_data как запасной вариант
+             s_t0_won = s_t0.get("won"); s_t1_won = s_t1.get("won") if s_t1 else None
+             if s_t0_won is True: res = "Win" if str(s_t0_id) == OUR_TEAM_ID else "Loss"
+             elif s_t1_won is True: res = "Win" if str(s_t1_id) == OUR_TEAM_ID else "Loss"
+             elif s_t0_won is False and s_t1_won is False: res = "Tie"
 
 
-        # --- Проверка на полноту данных нашей команды ---
-        if not found_all_our_players or our_player_count < 5 or processed_teams < 2:
-            details = f"Our players found: {our_player_count}/5. All mapped: {found_all_our_players}. Teams in g_data: {processed_teams}."
-            debug_logs.append(f"Warn: Skipping {s_id} - Incomplete data. {details}")
-            stats["skipped_incomplete_map"] += 1
-            continue
-
-        # --- Результат и длительность ---
-        duration_s = g_data['games'][0].get("clock", {}).get("currentSeconds")
-        duration_f = "N/A";
-        if isinstance(duration_s, (int, float)) and duration_s >= 0:
-            minutes, seconds = divmod(int(duration_s), 60)
-            duration_f = f"{minutes}:{seconds:02d}"
-        res = "N/A"; t0w = t0.get("won"); t1w = t1.get("won")
-        if t0w is True: res = "Win" if str(t0_id) == OUR_TEAM_ID else "Loss"
-        elif t1w is True: res = "Win" if str(t1_id) == OUR_TEAM_ID else "Loss"
-        elif t0w is False and t1w is False: res = "Tie"
-
-        # --- Формирование строки ---
+        # Формирование строки
         try:
             new_row_data = [
                 date_f, m_id, b_team_name, r_team_name, *b_bans, *r_bans,
-                draft_picks_ordered["B1"], draft_picks_ordered["R1"], draft_picks_ordered["R2"],
-                draft_picks_ordered["B2"], draft_picks_ordered["B3"], draft_picks_ordered["R3"],
-                draft_picks_ordered["R4"], draft_picks_ordered["B4"], draft_picks_ordered["B5"], draft_picks_ordered["R5"],
+                draft_picks_ordered["B1"], draft_picks_ordered["R1"], draft_picks_ordered["R2"], draft_picks_ordered["B2"], draft_picks_ordered["B3"], draft_picks_ordered["R3"], draft_picks_ordered["R4"], draft_picks_ordered["B4"], draft_picks_ordered["B5"], draft_picks_ordered["R5"],
                 actual_champs["blue"]["TOP"], actual_champs["blue"]["JGL"], actual_champs["blue"]["MID"], actual_champs["blue"]["BOT"], actual_champs["blue"]["SUP"],
                 actual_champs["red"]["TOP"], actual_champs["red"]["JGL"], actual_champs["red"]["MID"], actual_champs["red"]["BOT"], actual_champs["red"]["SUP"],
-                duration_f, res
-            ]
+                duration_f, res ]
             if len(new_row_data) != len(SCRIMS_HEADER): raise ValueError(f"Row length mismatch")
-            new_rows.append(new_row_data)
-            existing_ids.add(m_id)
-            stats["processed"] += 1
+            new_rows.append(new_row_data); existing_ids.add(m_id); stats["processed"] += 1
         except (KeyError, ValueError) as row_err:
-             debug_logs.append(f"Error: Constructing row failed for {s_id}: {row_err}. Check dict keys/row length.")
-             stats["skipped_incomplete_map"] += 1
-             continue
+             debug_logs.append(f"Error: Constructing row failed for {s_id}: {row_err}."); stats["skipped_incomplete_map"] += 1; continue
     # --- Конец цикла for по series_list ---
 
     # --- Код для вывода Summary и добавления строк в таблицу ---
     progress_bar.progress(1.0, text="Update complete. Checking results...")
-    summary = [
-        f"\n--- Update Summary ---", f"Series Checked: {total_series}", f"Our Scrims Found (by ID {OUR_TEAM_ID}): {stats['gms_count']}",
-        f"Skipped (Already Exists): {stats['skip_dupes']}", f"Skipped (No 'teams' in s_data): {stats['skipped_no_teams_sdata']}", # Добавлено
-        f"Skipped (No/Bad Game Data): {stats['skipped_no_game_data']}",
-        f"Skipped (Incomplete/Bad Map): {stats['skipped_incomplete_map']}", f"Processed Successfully: {stats['processed']}",
-        f"New Records Added: {len(new_rows)}"
-    ]
+    summary = [ f"\n--- Update Summary ---", f"Series Checked: {total_series}", f"Our Scrims Found (by ID {OUR_TEAM_ID} in g_data): {stats['gms_count']}", f"Skipped (Already Exists): {stats['skip_dupes']}", f"Skipped (No 'teams' in s_data): {stats['skipped_no_teams_sdata']}", f"Skipped (No/Bad/Incomplete g_data): {stats['skipped_no_game_data'] + stats['skipped_no_teams_gdata']}", f"Skipped (Our ID not in g_data): {stats['skipped_our_id_not_found']}", f"Skipped (Incomplete Map/Row): {stats['skipped_incomplete_map']}", f"Processed Successfully: {stats['processed']}", f"New Records Added: {len(new_rows)}" ] # Обновили ключи статистики
     if 'scrims_update_logs' not in st.session_state: st.session_state.scrims_update_logs = []
-    # Добавляем только последние N логов + итоги, чтобы не переполнять память сессии
     st.session_state.scrims_update_logs = st.session_state.scrims_update_logs[-50:] + debug_logs[-20:] + summary
-
-    st.code("\n".join(summary), language=None) # Показываем summary
+    st.code("\n".join(summary), language=None)
 
     if new_rows:
         try:
-            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED')
-            st.success(f"Added {len(new_rows)} new records to '{worksheet.title}'.")
-            try: aggregate_scrims_data.clear() # Очищаем кэш после добавления
+            worksheet.append_rows(new_rows, value_input_option='USER_ENTERED'); st.success(f"Added {len(new_rows)} new records to '{worksheet.title}'.")
+            try: aggregate_scrims_data.clear()
             except AttributeError: pass
             return True
-        except gspread.exceptions.APIError as api_err:
-            error_msg = f"GSpread API Error appending rows: {api_err}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows.")
-            return False
-        except Exception as e:
-            error_msg = f"Error appending rows: {e}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows.")
-            return False
+        except gspread.exceptions.APIError as api_err: error_msg = f"GSpread API Error appending rows: {api_err}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows."); return False
+        except Exception as e: error_msg = f"Error appending rows: {e}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows."); return False
     else:
         st.info("No new valid records found to add.")
-        if stats['gms_count'] > 0 and stats['processed'] == 0:
-             st.warning(f"Found {stats['gms_count']} scrims for ID {OUR_TEAM_ID}, but could not process them. Check logs for warnings (e.g., incomplete map, bad g_data).")
-        elif stats['gms_count'] == 0:
-             st.warning(f"No scrims found for ID {OUR_TEAM_ID} in checked series. Verify API filters or data availability.")
+        if stats['gms_count'] > 0 and stats['processed'] == 0: st.warning(f"Found {stats['gms_count']} scrims for ID {OUR_TEAM_ID}, but could not process them. Check logs.")
+        elif stats['gms_count'] == 0: st.warning(f"No scrims found for ID {OUR_TEAM_ID} in g_data of checked series.")
         return False
 
 # --- ИЗМЕНЕНА: aggregate_scrims_data (теперь возвращает и статистику игроков) ---
