@@ -445,15 +445,38 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
              processed_teams += 1; team_id_in_game = team_state.get("id"); is_our_team_in_game = (team_id_in_game == OUR_TEAM_ID); team_side = team_state.get("side");
              if team_side not in ["blue", "red"]: debug_logs.append(f"Warn: Unknown side '{team_side}' for team {team_id_in_game} in {s_id}"); continue
              target_champ_dict = actual_champs[team_side]; players_list = team_state.get("players", [])
-             if is_our_team_in_game:
-                 player_champion_map = {}; current_team_player_ids = set()
-                 for player_state in players_list: player_id = player_state.get("id"); champion_name = player_state.get("character", {}).get("name", "N/A");
-                     if player_id in PLAYER_IDS: player_champion_map[player_id] = champion_name; current_team_player_ids.add(player_id)
+              if is_our_team_in_game:
+                 player_champion_map = {} # Карта ID -> Чемп для нашей команды
+                 current_team_player_ids = set() # Множество ID наших игроков, найденных в игре
+                 # --- Начало цикла по игрокам нашей команды в данных игры ---
+                 for player_state in players_list:
+                     # Получаем ID и чемпиона из данных игрока
+                     player_id = player_state.get("id")
+                     champion_name = player_state.get("character", {}).get("name", "N/A")
+
+                     # --- ПРОВЕРЯЕМ ОТСТУП ЗДЕСЬ ---
+                     # Эта строка 'if' должна быть на том же уровне отступа,
+                     # что и 'player_id = ...' и 'champion_name = ...' выше.
+                     if player_id in PLAYER_IDS:
+                         # Строки ниже должны быть с отступом на один уровень ВНУТРИ 'if'
+                         player_champion_map[player_id] = champion_name
+                         current_team_player_ids.add(player_id)
+                 # --- Конец цикла по игрокам нашей команды ---
+
+                 # Этот код должен быть на том же уровне отступа, что и 'for player_state...'
                  our_player_count = len(current_team_player_ids)
+
+                 # Распределение по ролям (этот цикл должен быть на том же уровне, что и 'our_player_count = ...')
                  for p_id, role_full in PLAYER_ROLES_BY_ID.items():
                      role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
-                     if role_short in target_champ_dict: champion = player_champion_map.get(p_id, "N/A"); target_champ_dict[role_short] = champion;
-                         if p_id not in current_team_player_ids or champion == "N/A": found_all_our_players = False
+                     if role_short in target_champ_dict:
+                         champion = player_champion_map.get(p_id, "N/A")
+                         target_champ_dict[role_short] = champion
+                         # Проверяем, найден ли игрок ИЛИ его чемпион
+                         if p_id not in current_team_player_ids or champion == "N/A":
+                             found_all_our_players = False
+                             # Логирование происходит позже, при общей проверке
+             # --- Конец блока 'if is_our_team_in_game:' ---
              else:
                  opponent_team_name = team_state.get("name", "N/A")
                  if len(players_list) >= 5:
