@@ -295,14 +295,21 @@ def download_game_data(gid, logs, max_ret=3, delay_init=2):
 
 # --- ВРЕМЕННАЯ ОТЛАДОЧНАЯ ВЕРСИЯ update_scrims_data (Печать g_data) ---
 # Убедись, что импорты json, time, gspread и т.д. есть, и константы определены ВЫШЕ
+# В файле scrims.py
+
+# --- НОВАЯ ВРЕМЕННАЯ ОТЛАДОЧНАЯ ВЕРСИЯ update_scrims_data (Вывод g_data через st.json) ---
 def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     """
     ВРЕМЕННАЯ ВЕРСИЯ ДЛЯ ОТЛАДКИ:
-    Находит ПЕРВЫЙ скрим команды OUR_TEAM_ID (по s_data), пытается найти g_id,
-    скачивает g_data и ПЕЧАТАЕТ его содержимое. Затем останавливает выполнение.
+    Находит ПЕРВЫЙ скрим команды 19770 (по s_data), пытается найти g_id,
+    скачивает g_data и ВЫВОДИТ его на страницу Streamlit через st.json().
+    Затем останавливает выполнение.
     """
+    target_team_id = OUR_TEAM_ID
+    processed_target = False
+
     if not worksheet: st.error("Invalid Worksheet object."); return False
-    if not series_list: st.info("No series found to process."); return False
+    if not series_list: st.info("No series found from get_all_series."); return False
 
     try:
         existing_data = worksheet.get_all_values()
@@ -310,8 +317,7 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
     except Exception as e: st.error(f"Error reading existing sheet data: {e}"); return False
 
     total_series = len(series_list)
-    st.info(f"Debugging: Checking {total_series} series for Team ID {OUR_TEAM_ID} to print g_data...")
-    processed_target = False # Флаг, что мы нашли и обработали первую цель
+    st.info(f"Debugging: Checking {total_series} series for Team ID {target_team_id} to display g_data...")
 
     for i, s_summary in enumerate(series_list):
         s_id = s_summary.get("id")
@@ -338,11 +344,11 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
 
         t0 = teams_sdata[0] if len(teams_sdata) > 0 else None; t1 = teams_sdata[1] if len(teams_sdata) > 1 else None
         t0_id = str(t0.get("id", "")) if t0 else ""; t1_id = str(t1.get("id", "")) if t1 else ""
-        is_our_scrim_sdata = (OUR_TEAM_ID == t0_id or (t1 and OUR_TEAM_ID == t1_id))
+        is_our_scrim_sdata = (target_team_id == t0_id or (t1 and target_team_id == t1_id))
 
         # --- ИЩЕМ ПЕРВЫЙ СКРИМ НАШЕЙ КОМАНДЫ ---
         if is_our_scrim_sdata and not processed_target:
-            st.info(f"Found potential match for Team ID {OUR_TEAM_ID} in Series {s_id}. Getting g_id...")
+            st.info(f"Found potential match for Team ID {target_team_id} in Series {s_id}. Getting g_id...")
 
             # 3. Пытаемся извлечь g_id из s_data
             g_id = None
@@ -358,48 +364,47 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
 
             if not g_id:
                  st.error(f"DEBUG: Found Team ID in s_data for {s_id}, but failed to find g_id!")
-                 print(f"--- DEBUG: s_data for {s_id} (where g_id was not found) ---")
-                 try: print(json.dumps(s_data, indent=2, ensure_ascii=False))
-                 except: print(s_data)
-                 print(f"--------------------------------------------------")
-                 processed_target = True # Отметили, что обработали (неудачно)
-                 # Не останавливаемся, ищем следующую серию
-                 continue
+                 processed_target = True; return False
 
             st.info(f"Found g_id: {g_id}. Attempting to download g_data...")
-            print(f"\n--- DEBUG: Attempting g_data download for s:{s_id} / g:{g_id} ---")
+            print(f"\n--- DEBUG: Attempting g_data download for s:{s_id} / g:{g_id} ---") # Оставим в консоли
 
             # 4. Скачиваем g_data
             time.sleep(0.5)
             g_data = download_game_data(gid=g_id, logs=debug_logs, max_ret=3, delay_init=2)
 
-            # 5. !!! Печатаем g_data !!!
-            print(f"\n--- DEBUG: g_data content for s:{s_id} / g:{g_id} ---")
+            # 5. !!! ВЫВОДИМ g_data на страницу Streamlit !!!
+            st.subheader(f"DEBUG: g_data content for s:{s_id} / g:{g_id}")
             if g_data:
                 try:
-                    # Используем json.dumps для красивого вывода
-                    print(json.dumps(g_data, indent=2, ensure_ascii=False))
-                except Exception as print_err:
-                    print(f"Could not print g_data as JSON: {print_err}")
-                    print("Raw g_data:")
-                    print(g_data) # Печатаем как есть, если JSON не сработал
+                    # Используем st.json для интерактивного отображения
+                    st.json(g_data, expanded=False) # expanded=False чтобы не занимало много места сразу
+                    # Или используем st.code для простого текста
+                    # st.code(json.dumps(g_data, indent=2, ensure_ascii=False), language='json')
+                    print("--- DEBUG: g_data content was displayed in Streamlit UI ---") # Сообщение в консоль
+                except Exception as display_err:
+                    st.error(f"Could not display g_data as JSON: {display_err}")
+                    st.text("Raw g_data:")
+                    st.text(g_data) # Показываем как текст, если JSON не сработал
+                    print(f"--- DEBUG: Failed to display g_data as JSON, printed raw text. Error: {display_err} ---")
             else:
+                st.error(">>> g_data is None (Download failed or returned None)")
                 print(">>> g_data is None (Download failed or returned None)")
-            print(f"--------------------------------------------------")
-            # !!! Конец печати g_data !!!
+            # !!! Конец вывода g_data !!!
 
-            st.warning(f"DEBUG: Printed g_data for s:{s_id}/g:{g_id}. Stopping update process.")
+            st.warning(f"DEBUG: Displayed g_data for s:{s_id}/g:{g_id}. Stopping update process.")
             processed_target = True # Отметили, что обработали
-            return False # Останавливаем выполнение после печати
+            return False # Останавливаем выполнение после вывода
 
         # Задержка между проверками серий
         if not processed_target: time.sleep(0.1)
 
     # Если цикл завершился, а мы так и не нашли/обработали нашу серию
     if not processed_target:
-        st.error(f"DEBUG: Team ID {OUR_TEAM_ID} not found in any s_data OR failed to get g_data for the first match found.")
+        st.error(f"DEBUG: Team ID {target_team_id} not found in any processed s_data OR failed to process the first match found.")
 
     return False # Останавливаем основное обновление
+# --- КОНЕЦ ВРЕМЕННОЙ ОТЛАДОЧНОЙ ВЕРСИИ ---
 # --- КОНЕЦ ВРЕМЕННОЙ ОТЛАДОЧНОЙ ВЕРСИИ ---
 # --- ВОССТАНОВЛЕННАЯ: aggregate_scrims_data (читает Actual_, без кэша) ---
 def aggregate_scrims_data(worksheet, time_filter="All Time"):
