@@ -164,7 +164,7 @@ def get_all_series(_debug_placeholder=None): # Добавляем неиспол
           }
         }
     """
-    start_thresh = (datetime.utcnow() - timedelta(days=180)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_thresh = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
     variables = {
         "filter": {
             "titleId": 3,         # ID игры (предположительно LoL)
