@@ -165,7 +165,7 @@ def get_all_series(_debug_placeholder=None):
         }
     """
     # !!! КОНЕЦ ИЗМЕНЕНИЯ !!!
-    start_thresh = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_thresh = (datetime.utcnow() - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
     variables = {
         "filter": {"titleId": 3, "types": ["SCRIM"], "startTimeScheduled": {"gte": start_thresh}},
         "first": 50, "orderBy": "StartTimeScheduled", "orderDirection": "DESC"
@@ -707,6 +707,217 @@ def update_scrims_data(worksheet, series_list, debug_logs, progress_bar):
              st.warning(f"No series found containing Team ID {OUR_TEAM_ID} in s_data. Verify filters or data availability.")
         return False # <-- Отступ +2 уровня (8 пробелов)
 # --- Конец функции update_scrims_data ---
+
+# В файле scrims.py
+
+# Убедись, что импорты pandas, datetime, timedelta, defaultdict, gspread, st есть выше
+# Также убедись, что константы определены ВЫШЕ этой функции:
+# SCRIMS_HEADER, TEAM_NAME, PLAYER_IDS, PLAYER_ROLES_BY_ID, ROLE_ORDER_FOR_SHEET
+# И хелпер-функции get_champion_icon_html, color_win_rate_scrims
+
+# --- ВОССТАНОВЛЕННАЯ: aggregate_scrims_data (читает Actual_, без кэша) ---
+def aggregate_scrims_data(worksheet, time_filter="All Time"):
+    """
+    Агрегирует данные из Google Sheet, читая фактических чемпионов
+    из колонок 'Actual_SIDE_ROLE'.
+    Возвращает статистику по сторонам, историю матчей и статистику игроков.
+    """
+    # Отступ 1 (4 пробела)
+    if not worksheet:
+        st.error("Aggregate Error: Invalid worksheet object.")
+        # Возвращаем пустые структуры правильного типа
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+    # Инициализация статистики
+    blue_stats = {"wins": 0, "losses": 0, "total": 0}
+    red_stats = {"wins": 0, "losses": 0, "total": 0}
+    history_rows = []
+    player_stats = defaultdict(lambda: defaultdict(lambda: {'games': 0, 'wins': 0}))
+    # Ожидаемое количество колонок берем из константы
+    expected_cols = len(SCRIMS_HEADER)
+
+    # Настройка фильтра по времени
+    now = datetime.utcnow()
+    time_threshold = None
+    if time_filter != "All Time":
+        weeks_map = {"1 Week": 1, "2 Weeks": 2, "3 Weeks": 3, "4 Weeks": 4}
+        days_map = {"2 Months": 60} # Примерно 2 месяца
+        if time_filter in weeks_map:
+            time_threshold = now - timedelta(weeks=weeks_map[time_filter])
+        elif time_filter in days_map:
+            time_threshold = now - timedelta(days=days_map[time_filter])
+
+    # Чтение данных из таблицы
+    try:
+        data = worksheet.get_all_values()
+    except gspread.exceptions.APIError as api_err:
+        st.error(f"GSpread API Error reading sheet for aggregation: {api_err}")
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+    except Exception as e:
+        st.error(f"Read error during aggregation: {e}")
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+    if len(data) <= 1: # Если только заголовок или пусто
+        st.info(f"No data found in the sheet '{worksheet.title}' for aggregation matching the filter '{time_filter}'.")
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+    header = data[0]
+    # Проверяем заголовок на соответствие SCRIMS_HEADER
+    if header != SCRIMS_HEADER:
+        st.error(f"Header mismatch in '{worksheet.title}' during aggregation. Cannot proceed safely.")
+        st.error(f"Expected {len(SCRIMS_HEADER)} cols, Found {len(header)} cols.")
+        st.code(f"Expected: {SCRIMS_HEADER}\nFound:    {header}", language=None)
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+    # Создаем индекс колонок на основе SCRIMS_HEADER
+    try:
+        idx = {name: i for i, name in enumerate(SCRIMS_HEADER)}
+    except Exception as e:
+         st.error(f"Failed to create column index map: {e}")
+         return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+
+    # Обработка строк данных
+    rows_processed_after_filter = 0
+    for row_index, row in enumerate(data[1:], start=2): # start=2 для нумерации строк в таблице
+        # Отступ 2 (8 пробелов)
+        # Пропускаем строки с неверным количеством колонок
+        if len(row) != expected_cols:
+            continue
+        try:
+            # Отступ 3 (12 пробелов)
+            date_str = row[idx["Date"]]
+            # Применяем фильтр по времени, если он активен
+            if time_threshold and date_str != "N/A":
+                try:
+                    # Отступ 4 (16 пробелов)
+                    date_obj = datetime.strptime(date_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
+                    if date_obj < time_threshold:
+                        continue # Пропускаем строку, если она старше фильтра
+                except ValueError:
+                    continue # Пропускаем строки с неверной датой при активном фильтре
+
+            # Если строка прошла фильтр по времени (или фильтр неактивен), увеличиваем счетчик
+            rows_processed_after_filter += 1
+
+            # Определяем команды и результат
+            b_team, r_team, res = row[idx["Blue Team"]], row[idx["Red Team"]], row[idx["Result"]]
+            is_our_blue = (b_team == TEAM_NAME)
+            is_our_red = (r_team == TEAM_NAME)
+            # Пропускаем, если это не игра нашей команды
+            if not (is_our_blue or is_our_red):
+                continue
+
+            # Определяем победу нашей команды
+            is_our_win = (is_our_blue and res == "Win") or (is_our_red and res == "Win")
+
+            # --- Обновление общей статистики по сторонам ---
+            if is_our_blue:
+                # Отступ 4 (16 пробелов)
+                blue_stats["total"] += 1
+                if res == "Win": blue_stats["wins"] += 1
+                elif res == "Loss": blue_stats["losses"] += 1
+            else: # Наша команда красная
+                # Отступ 4 (16 пробелов)
+                red_stats["total"] += 1
+                if res == "Win": red_stats["wins"] += 1
+                elif res == "Loss": red_stats["losses"] += 1
+
+            # --- Подсчет статистики игроков по фактическим чемпионам ---
+            side_prefix = "Blue" if is_our_blue else "Red"
+            # Проходим по известным ролям нашей команды
+            for player_id, role_full in PLAYER_ROLES_BY_ID.items():
+                # Отступ 4 (16 пробелов)
+                player_name = PLAYER_IDS.get(player_id) # Получаем имя игрока по его ID
+                if player_name: # Если игрок найден в нашем ростере
+                    # Отступ 5 (20 пробелов)
+                    # Формируем короткое имя роли для ключа словаря/колонки
+                    role_short = role_full.replace("MIDDLE", "MID").replace("BOTTOM", "BOT").replace("UTILITY", "SUP").replace("JUNGLE","JGL")
+                    # Формируем имя колонки с фактическим чемпионом для нужной стороны и роли
+                    actual_champ_col_name = f"Actual_{side_prefix}_{role_short}" # e.g., Actual_Blue_TOP
+
+                    # Получаем чемпиона из ЭТОЙ колонки
+                    champion = row[idx[actual_champ_col_name]]
+                    # Обновляем статистику, если чемпион не "N/A" и не пустой
+                    if champion and champion != "N/A" and champion.strip() != "":
+                        # Отступ 6 (24 пробела)
+                        player_stats[player_name][champion]['games'] += 1
+                        if is_our_win: # Используем флаг победы нашей команды
+                            player_stats[player_name][champion]['wins'] += 1
+
+            # --- Подготовка строки для истории матчей ---
+            # Используем пики из колонок Draft_Pick_* для отображения истории драфта
+            bb_html = " ".join(get_champion_icon_html(row[idx[f"Blue Ban {i}"]]) for i in range(1, 6) if idx.get(f"Blue Ban {i}") is not None and row[idx[f"Blue Ban {i}"]] != "N/A")
+            rb_html = " ".join(get_champion_icon_html(row[idx[f"Red Ban {i}"]]) for i in range(1, 6) if idx.get(f"Red Ban {i}") is not None and row[idx[f"Red Ban {i}"]] != "N/A")
+            bp_html = " ".join(get_champion_icon_html(row[idx[pick_key]]) for pick_key in ["Draft_Pick_B1","Draft_Pick_B2","Draft_Pick_B3","Draft_Pick_B4","Draft_Pick_B5"] if idx.get(pick_key) is not None and row[idx[pick_key]] != "N/A")
+            rp_html = " ".join(get_champion_icon_html(row[idx[pick_key]]) for pick_key in ["Draft_Pick_R1","Draft_Pick_R2","Draft_Pick_R3","Draft_Pick_R4","Draft_Pick_R5"] if idx.get(pick_key) is not None and row[idx[pick_key]] != "N/A")
+            history_rows.append({
+                "Date": date_str,
+                "Blue Team": b_team,
+                "B Bans": bb_html,
+                "B Picks": bp_html, # Пики драфта для истории
+                "Result": res,
+                "Duration": row[idx["Duration"]],
+                "R Picks": rp_html, # Пики драфта для истории
+                "R Bans": rb_html,
+                "Red Team": r_team,
+                "Match ID": row[idx["Match ID"]]
+            })
+
+        except IndexError as e_idx:
+            # Отступ 3 (12 пробелов)
+            # Логируем ошибку индекса, если нужно для отладки
+            st.warning(f"Skipping row {row_index} due to IndexError: {e_idx}. Check row length vs header.")
+            continue # Пропускаем строку
+        except Exception as e_inner:
+            # Отступ 3 (12 пробелов)
+            # Логируем другие ошибки обработки строк
+            st.warning(f"Skipping row {row_index} due to error: {e_inner}")
+            continue # Пропускаем строку
+    # --- Конец цикла for row in data[1:] ---
+
+    # Если после фильтрации не осталось строк для обработки
+    if rows_processed_after_filter == 0 and time_filter != "All Time":
+        # Отступ 1 (4 пробела)
+        st.info(f"No scrim data found for the selected period: {time_filter}")
+        # Возвращаем пустые структуры
+        return {}, {}, pd.DataFrame(columns=["Date", "Blue Team", "B Bans", "B Picks", "Result", "Duration", "R Picks", "R Bans", "Red Team", "Match ID"]), {}
+
+
+    # --- Постобработка и возврат результатов ---
+    df_hist = pd.DataFrame(history_rows)
+    if not df_hist.empty:
+        try:
+            # Отступ 2 (8 пробелов)
+            # Сортируем историю по дате (новые сверху)
+            df_hist['DT_temp'] = pd.to_datetime(df_hist['Date'], errors='coerce')
+            # Удаляем строки, где дата не распозналась, перед сортировкой
+            df_hist.dropna(subset=['DT_temp'], inplace=True)
+            df_hist = df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
+        except Exception as sort_ex:
+             # Отступ 2 (8 пробелов)
+             st.warning(f"Could not sort match history by date: {sort_ex}")
+             # Не возвращаем ошибку, просто история будет не отсортирована
+
+    # Конвертируем и сортируем статистику игроков
+    final_player_stats = {player: dict(champions) for player, champions in player_stats.items()}
+    for player in final_player_stats:
+        # Отступ 2 (8 пробелов)
+        # Сортируем чемпионов по количеству игр (убывание)
+        final_player_stats[player] = dict(sorted(
+            final_player_stats[player].items(),
+            key=lambda item: item[1].get('games', 0), # Безопасный доступ к 'games'
+            reverse=True
+        ))
+
+    # Добавляем проверку, если статистика пуста (например, из-за фильтра)
+    if not final_player_stats and rows_processed_after_filter > 0:
+         # Отступ 1 (4 пробела)
+         st.info(f"Processed {rows_processed_after_filter} scrims for '{time_filter}', but no champion stats were generated (check data consistency or if players played on selected roles).")
+
+    # Отступ 1 (4 пробела)
+    return blue_stats, red_stats, df_hist, final_player_stats
+# --- Конец функции aggregate_scrims_data ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
     if st.button("⬅️ Back to HLL Stats"): st.session_state.current_page = "Hellenic Legends League Stats"; st.rerun()
