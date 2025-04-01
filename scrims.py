@@ -572,6 +572,7 @@ if new_rows:
         try: aggregate_scrims_data.clear(); # Очищаем кэш после добавления
         except AttributeError: pass
         return True
+        
     except gspread.exceptions.APIError as api_err: error_msg = f"GSpread API Error appending rows: {api_err}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows."); return False
     except Exception as e: error_msg = f"Error appending rows: {e}"; debug_logs.append(error_msg); st.error(error_msg); st.error(f"Failed to add {len(new_rows)} rows."); return False
 else:
