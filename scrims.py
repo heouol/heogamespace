@@ -485,127 +485,107 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
 
 # --- scrims_page (ИЗМЕНЕНА для использования новой aggregate_scrims_data) ---
 def scrims_page():
-    st.title(" scrims")
+    st.title(f"Scrims Analysis - {TEAM_NAME}")
+    if st.button("⬅️ Back to HLL Stats"): st.session_state.current_page = "Hellenic Legends League Stats"; st.rerun()
 
-    series_id = st.text_input(" scrims ID", "2783620") # Пример ID
+    client = setup_google_sheets();
+    if not client: st.error("GSheets client failed."); return
+    try: spreadsheet = client.open(SCRIMS_SHEET_NAME)
+    except Exception as e: st.error(f"Sheet access error: {e}"); return
+    wks = check_if_scrims_worksheet_exists(spreadsheet, SCRIMS_WORKSHEET_NAME);
+    if not wks: st.error(f"Worksheet access error."); return
 
-    if st.button(" scrims"):
-        if not series_id.isdigit():
-            st.warning(" scrims ID.")
-            return
+    with st.expander("Update Scrim Data", expanded=False):
+        logs = [];
+        if 'scrims_update_logs' not in st.session_state: st.session_state.scrims_update_logs = []
+        if st.button("Download & Update from GRID API", key="update_scrims_btn"):
+            st.session_state.scrims_update_logs = []; logs = st.session_state.scrims_update_logs
+            with st.spinner("Fetching series..."): series_list = get_all_series(logs)
+            if series_list:
+                st.info(f"Processing {len(series_list)} series...")
+                progress_bar_placeholder = st.empty(); progress_bar = progress_bar_placeholder.progress(0, text="Starting...")
+                try:
+                    data_added = update_scrims_data(wks, series_list, logs, progress_bar)
+                    if data_added: aggregate_scrims_data.clear() # Очищаем кэш если данные добавлены
+                except Exception as e: st.error(f"Update error: {e}"); logs.append(f"FATAL: {e}")
+                finally: progress_bar_placeholder.empty()
+            else: st.warning("No series found.")
+        if st.session_state.scrims_update_logs: st.code("\n".join(st.session_state.scrims_update_logs), language=None)
 
-        data = get_scrim_data(series_id)
+    st.divider(); st.subheader("Scrim Performance")
+    time_f = st.selectbox("Filter by Time:", ["All Time", "1 Week", "2 Weeks", "3 Weeks", "4 Weeks", "2 Months"], key="scrims_time_filter")
 
-        if data and data.get('teams') and len(data['teams']) == 2:
-            # Отображение общей информации о серии (оставляем как было)
-            title_info = data.get('title', {})
-            st.subheader(f" {title_info.get('nameShortened', 'N/A')} (ID: {series_id})")
-            st.write(f" {data.get('format', 'N/A')}")
-            st.write(f" {data.get('updatedAt', 'N/A')}")
+    # --- Вызываем aggregate_scrims_data, получаем 4 значения ---
+    blue_s, red_s, df_hist, player_champ_stats = aggregate_scrims_data(wks, time_f)
 
-            # Основные колонки для команд (оставляем как было)
-            col1, col2 = st.columns(2)
+    # --- Отображаем общую статистику (без изменений) ---
+    try:
+        games_f = blue_s["total"] + red_s["total"]; wins_f = blue_s["wins"] + red_s["wins"]; loss_f = blue_s["losses"] + red_s["losses"]
+        st.markdown(f"**Performance ({time_f})**"); co, cb, cr = st.columns(3)
+        with co: wr = (wins_f / games_f * 100) if games_f > 0 else 0; st.metric("Total Games", games_f); st.metric("Overall WR", f"{wr:.1f}%", f"{wins_f}W-{loss_f}L")
+        with cb: bwr = (blue_s["wins"] / blue_s["total"] * 100) if blue_s["total"] > 0 else 0; st.metric("Blue WR", f"{bwr:.1f}%", f"{blue_s['wins']}W-{blue_s['losses']}L ({blue_s['total']} G)")
+        with cr: rwr = (red_s["wins"] / red_s["total"] * 100) if red_s["total"] > 0 else 0; st.metric("Red WR", f"{rwr:.1f}%", f"{red_s['wins']}W-{red_s['losses']}L ({red_s['total']} G)")
+    except Exception as e: st.error(f"Error display summary: {e}")
 
-            # --- Обработка и отображение Команды 1 ---
-            with col1:
-                team1 = data['teams'][0]
-                # Отображение данных команды (оставляем как было)
-                team1_name = team1.get('name', 'Team 1')
-                team1_score = team1.get('score', 0)
-                team1_kills = team1.get('kills', 0)
-                team1_won = team1.get('won', False)
-                status1 = " ( )" if team1_won else " ( )" # Замени смайлики если нужно
-                st.header(f"{team1_name}{status1}")
-                st.write(f"Score: {team1_score}")
-                st.write(f"Kills: {team1_kills}")
-                st.markdown("---") # Разделитель
+    st.divider()
 
-                if 'players' in team1:
-                    for player in team1['players']:
-                        # Получение данных игрока (оставляем как было)
-                        player_name = player.get('name', 'Unknown Player')
-                        player_role = player.get('role', 'Unknown Role').capitalize()
+    # --- ВКЛАДКИ ДЛЯ ИСТОРИИ И СТАТИСТИКИ ИГРОКОВ ---
+    tab1, tab2 = st.tabs(["📜 Match History", "📊 Player Champion Stats"])
 
-                        # --- ИСПРАВЛЕННАЯ ЛОГИКА ПОЛУЧЕНИЯ ЧЕМПИОНА (как в прошлый раз) ---
-                        champion_name = "N/A"
-                        champion_image_url = None
-                        champion_data = player.get('champion')
-                        if champion_data is not None:
-                            champion_name = champion_data.get('name', 'Unknown Champion')
-                            champion_image_url = champion_data.get('image')
-                        # --- КОНЕЦ ИСПРАВЛЕННОЙ ЛОГИКИ ---
-
-                        # --- ВОССТАНОВЛЕННЫЙ ОРИГИНАЛЬНЫЙ ДИЗАЙН ОТОБРАЖЕНИЯ ИГРОКА ---
-                        # Отображаем имя и роль игрока
-                        st.write(f"**{player_name}** ({player_role})")
-
-                        # Отображаем картинку чемпиона, если она есть
-                        if champion_image_url is not None:
-                            st.image(champion_image_url, width=50)
-                        else:
-                            # Можно добавить заглушку текстом, если картинки нет,
-                            # или просто ничего не выводить
-                            st.caption("No Img") # Например, так
-
-                        # Отображаем имя чемпиона
-                        st.write(f" {champion_name}")
-                        # --- КОНЕЦ ВОССТАНОВЛЕННОГО ДИЗАЙНА ---
-
-                        # Разделитель между игроками (оставляем как было)
-                        st.markdown("---")
-
-            # --- Обработка и отображение Команды 2 (аналогично Команде 1) ---
-            with col2:
-                team2 = data['teams'][1]
-                # Отображение данных команды (оставляем как было)
-                team2_name = team2.get('name', 'Team 2')
-                team2_score = team2.get('score', 0)
-                team2_kills = team2.get('kills', 0)
-                team2_won = team2.get('won', False)
-                status2 = " ( )" if team2_won else " ( )" # Замени смайлики если нужно
-                st.header(f"{team2_name}{status2}")
-                st.write(f"Score: {team2_score}")
-                st.write(f"Kills: {team2_kills}")
-                st.markdown("---") # Разделитель
-
-                if 'players' in team2:
-                    for player in team2['players']:
-                        # Получение данных игрока (оставляем как было)
-                        player_name = player.get('name', 'Unknown Player')
-                        player_role = player.get('role', 'Unknown Role').capitalize()
-
-                        # --- ИСПРАВЛЕННАЯ ЛОГИКА ПОЛУЧЕНИЯ ЧЕМПИОНА (как в прошлый раз) ---
-                        champion_name = "N/A"
-                        champion_image_url = None
-                        champion_data = player.get('champion')
-                        if champion_data is not None:
-                            champion_name = champion_data.get('name', 'Unknown Champion')
-                            champion_image_url = champion_data.get('image')
-                        # --- КОНЕЦ ИСПРАВЛЕННОЙ ЛОГИКИ ---
-
-                        # --- ВОССТАНОВЛЕННЫЙ ОРИГИНАЛЬНЫЙ ДИЗАЙН ОТОБРАЖЕНИЯ ИГРОКА ---
-                        st.write(f"**{player_name}** ({player_role})")
-
-                        if champion_image_url is not None:
-                            st.image(champion_image_url, width=50)
-                        else:
-                            st.caption("No Img")
-
-                        st.write(f" {champion_name}")
-                        # --- КОНЕЦ ВОССТАНОВЛЕННОГО ДИЗАЙНА ---
-
-                        # Разделитель между игроками (оставляем как было)
-                        st.markdown("---")
-
-        # Обработка случаев некорректных данных (оставляем как было)
-        elif data:
-             st.warning(" scrims ID ( Teams).")
-             # st.json(data) # Для отладки
+    with tab1:
+        st.subheader(f"Match History ({time_f})")
+        if not df_hist.empty:
+            st.markdown(df_hist.to_html(escape=False, index=False, classes='compact-table history-table', justify='center'), unsafe_allow_html=True)
         else:
-             # Ошибка API обработана в get_scrim_data
-             pass
+            st.info(f"No match history for {time_f}.")
+
+    with tab2:
+        st.subheader(f"Player Champion Stats ({time_f})")
+        # st.caption("Note: Roles are assumed based on pick order (Top > Jg > Mid > Bot > Sup).") # Убрано примечание
+
+        if not player_champ_stats:
+             st.info(f"No player champion stats available for {time_f}.")
+        else:
+             # Используем PLAYER_IDS для получения имен игроков в нужном порядке
+             player_order = [PLAYER_IDS[pid] for pid in ["26433", "25262", "25266", "20958", "21922"] if pid in PLAYER_IDS]
+             player_cols = st.columns(len(player_order))
+
+             for i, player_name in enumerate(player_order):
+                 with player_cols[i]:
+                     # Находим роль игрока для отображения
+                     player_role = "Unknown"
+                     for pid, role in PLAYER_ROLES_BY_ID.items():
+                         if PLAYER_IDS.get(pid) == player_name:
+                             player_role = role
+                             break
+                     st.markdown(f"**{player_name}** ({player_role})")
+
+                     player_data = player_champ_stats.get(player_name, {})
+                     stats_list = []
+                     if player_data:
+                         for champ, stats in player_data.items():
+                             games = stats.get('games', 0)
+                             if games > 0:
+                                 wins = stats.get('wins', 0)
+                                 win_rate = round((wins / games) * 100, 1)
+                                 stats_list.append({
+                                     'Icon': get_champion_icon_html(champ, 20, 20),
+                                     'Champion': champ, # Оставляем имя для ясности
+                                     'Games': games,
+                                     'WR%': win_rate
+                                 })
+
+                     if stats_list:
+                         df_player = pd.DataFrame(stats_list).sort_values("Games", ascending=False).reset_index(drop=True)
+                         df_player['WR%'] = df_player['WR%'].apply(color_win_rate_scrims)
+                         st.markdown(
+                              # Убрали столбец Champion, Icon+WR% достаточно
+                              df_player.to_html(escape=False, index=False, columns=['Icon', 'Games', 'WR%'], classes='compact-table player-stats', justify='center'),
+                              unsafe_allow_html=True
+                         )
+                     else:
+                         st.caption("No stats.")
 
 
 # --- Keep __main__ block as is ---
 if __name__ == "__main__": pass
-# --- END OF FILE scrims.py ---
