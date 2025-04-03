@@ -320,17 +320,7 @@ def download_game_data(gid, logs, max_ret=3, delay_init=2):
 # --- ПОЛНАЯ ФИНАЛЬНАЯ ВЕРСИЯ: update_scrims_data (с перепроверенными отступами) ---
 # Убедись, что все нужные импорты и КОНСТАНТЫ определены ВЫШЕ
 # (OUR_TEAM_ID, SCRIMS_HEADER, PLAYER_IDS, PLAYER_ROLES_BY_ID, API_REQUEST_DELAY и т.д.)
-# В файле scrims.py
-
-# --- ВРЕМЕННАЯ ОТЛАДОЧНАЯ ВЕРСИЯ update_scrims_data (Печать g_data) ---
-# Убедись, что импорты json, time, gspread и т.д. есть, и константы определены ВЫШЕ
-# В файле scrims.py
-
-# В файле scrims.py
-
-# Убедись, что все нужные импорты и КОНСТАНТЫ определены ВЫШЕ
-# (OUR_TEAM_ID, SCRIMS_HEADER, PLAYER_IDS, PLAYER_ROLES_BY_ID, API_REQUEST_DELAY и т.д.)
-
+# --- ВЕРСИЯ 5 (ФИНАЛЬНАЯ): Используем PLAYER_ROLES_BY_ID для НАШЕЙ команды ---
 def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar):
     if not worksheet:
         st.error("Invalid Worksheet object.")
