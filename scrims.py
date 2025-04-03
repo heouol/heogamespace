@@ -20,6 +20,36 @@ SCRIMS_SHEET_NAME = "Scrims_GMS_Detailed"
 SCRIMS_WORKSHEET_NAME = "Scrims"
 API_REQUEST_DELAY = 1.0
 
+# --- ВАЖНО: Карта для сопоставления Riot Никнеймов с GRID ID ---
+# Вам нужно поддерживать этот словарь в актуальном состоянии!
+# Ключ = Riot Никнейм (riotIdGameName/summonerName из API), Значение = GRID ID игрока из PLAYER_IDS
+OUR_PLAYER_RIOT_NAMES_TO_GRID_ID = {
+    # Aytekn
+    "AyteknnnN777": "26433",
+    "Aytekn": "26433",
+    "GSMC Aytekn": "26433", # <--- ДОБАВЛЕНО
+    # Pallet
+    "KC Bo": "25262",
+    "yiqunsb": "25262",
+    "Pallet": "25262",
+    "GSMC Pallet": "25262", # <--- ДОБАВЛЕНО
+    # Tsiperakos
+    "Tsiperakos": "25266",
+    "Tsiper": "25266",
+    "GSMC Tsiperakos": "25266", # <--- ДОБАВЛЕНО
+    # Kenal
+    "Kenal": "20958",
+    "Kaneki Kenal": "20958",
+    "GSMC Kenal": "20958", # <--- ДОБАВЛЕНО
+    # Centu
+    "ΣΑΝ ΚΡΟΥΑΣΑΝ": "21922",
+    "Aim First": "21922",
+    "CENTU": "21922",
+    "GSMC CENTU": "21922" # <--- ДОБАВЛЕНО
+}
+debug_logs.append(f"Using internal map for {len(OUR_PLAYER_RIOT_NAMES_TO_GRID_ID)} Riot Names -> GRID IDs.")
+# -------------------------------------------------------------
+
 # Используем ID игроков для точного сопоставления
 PLAYER_IDS = {
     "26433": "Aytekn",
