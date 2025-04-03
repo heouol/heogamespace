@@ -47,7 +47,6 @@ OUR_PLAYER_RIOT_NAMES_TO_GRID_ID = {
     "CENTU": "21922",
     "GSMC CENTU": "21922" # <--- ДОБАВЛЕНО
 }
-debug_logs.append(f"Using internal map for {len(OUR_PLAYER_RIOT_NAMES_TO_GRID_ID)} Riot Names -> GRID IDs.")
 # -------------------------------------------------------------
 
 # Используем ID игроков для точного сопоставления
