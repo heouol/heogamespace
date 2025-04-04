@@ -160,26 +160,31 @@ def log_message(message, logs_list):
         logs_list.append(log_entry)
 
 # Функция для выполнения GraphQL запросов (адаптировано из lol_basic_parser.py)
-def post_graphql_request(query, endpoint, api_key, logs_list, retries=3, initial_delay=1):
+def post_graphql_request(query_string, variables, endpoint, api_key, logs_list, retries=3, initial_delay=1):
     """ Отправляет GraphQL POST запрос с обработкой ошибок и повторами """
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
-    payload = json.dumps({"query": query})
+    # --- ИСПРАВЛЕНО: Формируем payload с query и variables ---
+    payload = json.dumps({"query": query_string, "variables": variables})
     url = f"{GRID_BASE_URL}{endpoint}"
     last_exception = None
 
     for attempt in range(retries):
         try:
             log_message(f"GraphQL POST to {endpoint} (Attempt {attempt + 1}/{retries})", logs_list)
+            # --- ИСПРАВЛЕНО: Передаем исправленный payload ---
             response = requests.post(url, headers=headers, data=payload, timeout=20) # Увеличен таймаут
+            # --- КОНЕЦ ИСПРАВЛЕНИЙ в этой функции ---
             response.raise_for_status() # Проверка на HTTP ошибки (4xx, 5xx)
 
             response_data = response.json()
+            # Проверка на GraphQL ошибки в ответе
             if "errors" in response_data and response_data["errors"]:
-                error_msg = response_data["errors"][0]["message"]
-                log_message(f"GraphQL Error: {error_msg}", logs_list)
-                # Попробуем еще раз при некоторых ошибках, но не при всех
-                if "UNAUTHENTICATED" in error_msg or "UNAUTHORIZED" in error_msg:
-                     st.error(f"GraphQL Auth Error: {error_msg}. Check API Key/Permissions.")
+                error_msg = response_data["errors"][0].get("message", "Unknown GraphQL error")
+                # Расширенное логирование ошибки GraphQL
+                log_message(f"GraphQL Error in response: {json.dumps(response_data['errors'])}", logs_list)
+                # Проверка на критические ошибки аутентификации/авторизации
+                if "UNAUTHENTICATED" in error_msg or "UNAUTHORIZED" in error_msg or "forbidden" in error_msg.lower():
+                     st.error(f"GraphQL Auth/Permission Error: {error_msg}. Check API Key/Permissions.")
                      return None # Нет смысла повторять
                 last_exception = Exception(f"GraphQL Error: {error_msg}")
                 # Задержка перед повтором
@@ -192,17 +197,33 @@ def post_graphql_request(query, endpoint, api_key, logs_list, retries=3, initial
         except requests.exceptions.HTTPError as http_err:
             log_message(f"HTTP error on attempt {attempt + 1}: {http_err}", logs_list)
             last_exception = http_err
-            if response.status_code == 429: # Rate limit
-                retry_after = int(response.headers.get("Retry-After", initial_delay * (2 ** attempt)))
-                log_message(f"Rate limited (429). Retrying after {retry_after} seconds.", logs_list)
-                st.toast(f"Rate limited. Waiting {retry_after}s...")
-                time.sleep(retry_after)
-                continue
-            elif response.status_code in [401, 403]:
-                 st.error(f"Authorization error ({response.status_code}). Check API Key/Permissions.")
-                 return None # Нет смысла повторять
-            # Другие HTTP ошибки - делаем задержку и повторяем
-            time.sleep(initial_delay * (2 ** attempt))
+            if response is not None: # Проверка, что response был получен перед проверкой status_code
+                if response.status_code == 429: # Rate limit
+                    retry_after = int(response.headers.get("Retry-After", initial_delay * (2 ** attempt)))
+                    log_message(f"Rate limited (429). Retrying after {retry_after} seconds.", logs_list)
+                    st.toast(f"Rate limited. Waiting {retry_after}s...")
+                    time.sleep(retry_after)
+                    continue
+                elif response.status_code in [401, 403]:
+                    st.error(f"Authorization error ({response.status_code}). Check API Key/Permissions.")
+                    return None # Нет смысла повторять
+                elif response.status_code == 400:
+                     # Логируем тело ответа при 400 Bad Request для диагностики
+                     try:
+                         error_details = response.json()
+                         log_message(f"Bad Request (400) details: {json.dumps(error_details)}", logs_list)
+                     except json.JSONDecodeError:
+                         log_message(f"Bad Request (400), could not decode JSON response body: {response.text[:500]}", logs_list)
+                     last_exception = http_err # Сохраняем ошибку
+                     # Часто 400 не исправить повтором, выходим из цикла
+                     break
+            # Другие HTTP ошибки - делаем задержку и повторяем (особенно 5xx)
+            if response is None or 500 <= response.status_code < 600:
+                 time.sleep(initial_delay * (2 ** attempt))
+            else:
+                 # Для других клиентских ошибок повтор может не помочь
+                 break
+
 
         except requests.exceptions.RequestException as req_err:
             log_message(f"Request exception on attempt {attempt + 1}: {req_err}", logs_list)
@@ -210,18 +231,24 @@ def post_graphql_request(query, endpoint, api_key, logs_list, retries=3, initial
             time.sleep(initial_delay * (2 ** attempt))
 
         except json.JSONDecodeError as json_err:
-             log_message(f"JSON decode error on attempt {attempt+1}: {json_err}. Response text: {response.text[:200]}...", logs_list)
+             log_message(f"JSON decode error on attempt {attempt+1}: {json_err}. Response text: {response.text[:200] if response else 'No response'}...", logs_list)
              last_exception = json_err
              time.sleep(initial_delay * (2 ** attempt))
 
         except Exception as e:
-            log_message(f"Unexpected error on attempt {attempt + 1}: {e}", logs_list)
+            # Ловим другие возможные ошибки
+            import traceback
+            log_message(f"Unexpected error in post_graphql_request attempt {attempt + 1}: {e}\n{traceback.format_exc()}", logs_list)
             last_exception = e
             time.sleep(initial_delay * (2 ** attempt))
 
+
     log_message(f"GraphQL request failed after {retries} attempts. Last error: {last_exception}", logs_list)
-    st.error(f"GraphQL request failed: {last_exception}")
+    # Не выводим ошибку в st.error здесь повторно, если она уже была выведена (напр. 401/403)
+    if not isinstance(last_exception, requests.exceptions.HTTPError) or (last_exception.response.status_code not in [401, 403]):
+        st.error(f"GraphQL request failed: {last_exception}")
     return None
+
 
 # Функция для выполнения REST GET запросов (адаптировано из lol_basic_parser.py)
 def get_rest_request(endpoint, api_key, logs_list, retries=5, initial_delay=2, expected_type='json'):
@@ -306,7 +333,8 @@ def get_rest_request(endpoint, api_key, logs_list, retries=5, initial_delay=2, e
 # @st.cache_data(ttl=300) # Кэшируем на 5 минут
 def get_all_series(api_key, logs_list):
     """ Получает список ID и дат начала LoL скримов за последние 14 дней """
-    query = """
+    # Строка GraphQL запроса
+    query_string = """
         query ($filter: SeriesFilter, $first: Int, $after: Cursor, $orderBy: SeriesOrderBy, $orderDirection: OrderDirection) {
           allSeries(
             filter: $filter, first: $first, after: $after,
@@ -325,9 +353,12 @@ def get_all_series(api_key, logs_list):
     """
     # Берем скримы за последние 14 дней (можно увеличить)
     start_thresh = (datetime.now(timezone.utc) - timedelta(days=14)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Словарь с переменными для запроса
     variables_template = {
         "filter": {"titleId": 3, "types": ["SCRIM"], "startTimeScheduled": {"gte": start_thresh}},
-        "first": 50, "orderBy": "StartTimeScheduled", "orderDirection": "DESC"
+        "first": 50,
+        "orderBy": "StartTimeScheduled",
+        "orderDirection": "DESC"
     }
 
     all_nodes = []
@@ -337,24 +368,23 @@ def get_all_series(api_key, logs_list):
 
     while page_num <= max_pages:
         current_variables = variables_template.copy()
+        # Добавляем курсор для пагинации, если он есть
         if cursor:
             current_variables["after"] = cursor
+        else:
+            # Удаляем 'after', если курсора нет (для первого запроса)
+            current_variables.pop("after", None)
 
-        # Формируем полный запрос с переменными
-        # GraphQL клиенты обычно делают это автоматически, здесь вручную для requests
-        # Заменяем плейсхолдеры переменных в строке запроса
-        # Важно: Это УПРОЩЕННЫЙ подход. Правильнее передавать variables отдельно в JSON payload.
-        # Но post_graphql_request ожидает строку query.
-        # Будем передавать variables как отдельный аргумент в post_graphql_request если он будет доработан.
-        # Пока что оставим так, как было в исходном коде, предполагая, что variables правильно используются внутри post.
-        # --- Передаем query и variables в post_graphql_request ---
-        # Создаем payload внутри post_graphql_request
-        query_payload = {
-            "query": query,
-            "variables": current_variables
-        }
-        # Убираем variables из payload т.к. они уже внутри query_payload
-        response_data = post_graphql_request(json.dumps(query_payload), "central-data/graphql", api_key, logs_list)
+
+        # --- ИСПРАВЛЕНО: Передаем query_string и current_variables отдельно ---
+        response_data = post_graphql_request(
+            query_string=query_string,
+            variables=current_variables,
+            endpoint="central-data/graphql",
+            api_key=api_key,
+            logs_list=logs_list
+        )
+        # --- КОНЕЦ ИСПРАВЛЕНИЙ в этой функции ---
 
         if not response_data:
             log_message(f"Failed to fetch series page {page_num}. Stopping.", logs_list)
