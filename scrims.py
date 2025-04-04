@@ -687,7 +687,11 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
                 blue_team_name = TEAM_NAME if our_side == 'blue' else opponent_team_name; red_team_name = TEAM_NAME if our_side == 'red' else opponent_team_name
 
                 result = "N/A" # Определение результата
-                for team in teams_data: result = "Win" if team.get("win") else "Loss" if team.get("teamId")==our_team_id else result; break if result!="N/A" else None
+                for team in teams_data: result = "Win" 
+                    if team.get("win") else "Loss" 
+                if team.get("teamId")==our_team_id else result; 
+                break 
+                if result!="N/A" else None
 
                 blue_bans = ["N/A"]*5; red_bans = ["N/A"]*5 # Баны
                 for team in teams_data:
