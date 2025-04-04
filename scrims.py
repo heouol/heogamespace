@@ -788,7 +788,9 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
 
     # Чтение данных
     try:
-        data = worksheet.get_all_values()
+        # Ограничиваем количество строк для чтения, если данных очень много (опционально)
+        # data = worksheet.get_all_values(value_render_option='FORMATTED_VALUE') # FORMATTED_VALUE может быть медленнее
+        data = worksheet.get_all_values() # По умолчанию UNFORMATTED_VALUE, быстрее
     except Exception as e:
         st.error(f"Read error during aggregation: {e}")
         return {}, {}, pd.DataFrame(), {}
@@ -816,10 +818,18 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
     rows_processed_after_filter = 0
     relevant_player_names = set(ROSTER_RIOT_NAME_TO_GRID_ID.keys()) # Имена игроков из нашего ростера
 
+    # Используем ROLE_ORDER_FOR_SHEET для итерации, так как он содержит полные имена ролей
+    ROLE_ORDER_FOR_SHEET = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+    # Маппинг полных имен ролей на аббревиатуры в заголовке
+    role_to_abbr = {
+        "TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID",
+        "BOTTOM": "BOT", "UTILITY": "SUP"
+    }
+
     for row_index, row in enumerate(data[1:], start=2):
-        if len(row) != len(SCRIMS_HEADER):
-            # Пропускаем строки с неверным количеством колонок
-            # st.warning(f"Skipping row {row_index} due to column count mismatch.")
+        # Проверяем, достаточно ли колонок в строке
+        if len(row) < len(SCRIMS_HEADER):
+            # st.warning(f"Skipping row {row_index} due to insufficient column count ({len(row)} < {len(SCRIMS_HEADER)}).")
             continue
         try:
             # --- Фильтр по времени ---
@@ -844,11 +854,8 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
             is_our_blue = (blue_team_name == TEAM_NAME)
             is_our_red = (red_team_name == TEAM_NAME)
 
-            # Если это не игра нашей команды (по имени), пропускаем
-            # Это резервная проверка, основная логика определения - при парсинге
             if not is_our_blue and not is_our_red:
-                # Может случиться, если TEAM_NAME изменился или парсинг был неточен
-                continue
+                continue # Пропускаем, если не наша игра
 
             # --- Обновляем статистику по сторонам ---
             if is_our_blue:
@@ -866,59 +873,42 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
 
             # Проходим по ролям и извлекаем чемпиона и игрока нашей команды
             for role in ROLE_ORDER_FOR_SHEET: # TOP, JUNGLE, MIDDLE, BOTTOM, UTILITY
-                champ_col = f"Actual_{our_side_prefix}_{role}"
+                role_abbr = role_to_abbr.get(role) # Получаем аббревиатуру (JGL, MID, etc.)
+                if not role_abbr: continue # Пропускаем, если роль не найдена в маппинге
+
+                # --- ИСПРАВЛЕНО: Используем аббревиатуру для ключа колонки ---
+                champ_col = f"Actual_{our_side_prefix}_{role_abbr}"
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+                # Проверяем, существует ли ключ перед доступом (доп. безопасность)
+                if champ_col not in idx_map:
+                    st.warning(f"Column key '{champ_col}' constructed but not found in idx_map. Skipping stats for this role/row {row_index}.")
+                    continue
+
                 champion = row[idx_map[champ_col]]
 
                 if champion and champion != "N/A":
-                    # Находим игрока на этой роли
-                    # Логика определения игрока может быть сложной, если состав меняется.
-                    # Простой вариант: Ищем имя игрока из ростера в названии команды или ожидаем его на этой роли.
-                    # Пока что просто агрегируем по чемпиону на роли для нашей команды.
-                    # Для статистики по ИГРОКУ, нужно знать, КТО играл на этой роли.
-                    # --- ДОБАВЛЯЕМ ЛОГИКУ СОПОСТАВЛЕНИЯ С РОСТЕРОМ ---
-                    # Определяем индекс участника по роли и стороне
-                    participant_index = -1
-                    if is_our_blue:
-                         if role == "TOP": participant_index = 0
-                         elif role == "JGL": participant_index = 1
-                         elif role == "MID": participant_index = 2
-                         elif role == "BOT": participant_index = 3
-                         elif role == "SUP": participant_index = 4
-                    else: # is_our_red
-                         if role == "TOP": participant_index = 5
-                         elif role == "JGL": participant_index = 6
-                         elif role == "MID": participant_index = 7
-                         elif role == "BOT": participant_index = 8
-                         elif role == "SUP": participant_index = 9
-
-                    # Пытаемся найти имя игрока (непосредственно из данных не сохраняли,
-                    # но можем попытаться сопоставить по роли)
-                    # Это НЕ НАДЕЖНО, если игроки меняются ролями!
-                    # Лучше было бы СОХРАНЯТЬ имя игрока в таблицу.
-                    # Пока сделаем ЗАГЛУШКУ: ищем, кто из ростера обычно играет на этой роли
+                    # Упрощенная логика сопоставления игрока с ролью
+                    # (Предполагаем, что игрок на этой роли - тот, кто указан в PLAYER_ROLES_BY_ID)
                     player_name_on_role = "Unknown"
-                    grid_id_on_role = None
                     for grid_id, roster_role in PLAYER_ROLES_BY_ID.items():
+                        # Сравниваем с ПОЛНОЙ ролью из ROLE_ORDER_FOR_SHEET
                         if roster_role == role:
-                             grid_id_on_role = grid_id
-                             player_name_on_role = PLAYER_IDS.get(grid_id_on_role, "Unknown")
+                             player_name_on_role = PLAYER_IDS.get(grid_id, "Unknown")
                              break
 
-                    # Если нашли игрока, записываем статистику для него
+                    # Если нашли игрока из нашего ростера, записываем статистику
                     if player_name_on_role != "Unknown" and player_name_on_role in relevant_player_names:
                         player_stats[player_name_on_role][champion]['games'] += 1
                         if is_win:
                             player_stats[player_name_on_role][champion]['wins'] += 1
-                    # else:
-                        # Либо роль не совпала, либо игрок не из основного ростера
-                        # Можно добавить логирование или обработку замен
 
             # --- Подготовка строки для истории матчей ---
             # Показываем фактических чемпионов, баны по ID
             bb_str = " ".join(row[idx_map[f"Blue Ban {i} ID"]] for i in range(1, 6) if row[idx_map[f"Blue Ban {i} ID"]] != "N/A")
             rb_str = " ".join(row[idx_map[f"Red Ban {i} ID"]] for i in range(1, 6) if row[idx_map[f"Red Ban {i} ID"]] != "N/A")
-            bp_html = " ".join(get_champion_icon_html(row[idx_map[f"Actual_Blue_{role}"]]) for role in ROLE_ORDER_FOR_SHEET if row[idx_map[f"Actual_Blue_{role}"]] != "N/A")
-            rp_html = " ".join(get_champion_icon_html(row[idx_map[f"Actual_Red_{role}"]]) for role in ROLE_ORDER_FOR_SHEET if row[idx_map[f"Actual_Red_{role}"]] != "N/A")
+            bp_html = " ".join(get_champion_icon_html(row[idx_map[f"Actual_Blue_{role_to_abbr[role]}"]]) for role in ROLE_ORDER_FOR_SHEET if row[idx_map[f"Actual_Blue_{role_to_abbr[role]}"]] != "N/A")
+            rp_html = " ".join(get_champion_icon_html(row[idx_map[f"Actual_Red_{role_to_abbr[role]}"]]) for role in ROLE_ORDER_FOR_SHEET if row[idx_map[f"Actual_Red_{role_to_abbr[role]}"]] != "N/A")
 
             history_rows.append({
                 "Date": date_str,
@@ -974,7 +964,6 @@ def aggregate_scrims_data(worksheet, time_filter="All Time"):
 
     # Возвращаем синюю статистику, красную, историю, статистику игроков
     return blue_stats, red_stats, df_hist, final_player_stats
-# --- Конец функции aggregate_scrims_data ---
 
 # --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Адаптирована) ---
 def scrims_page():
