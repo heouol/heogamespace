@@ -643,7 +643,8 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
     role_abbr_map = {"TOP": "TOP", "JGL": "JGL", "MID": "MID", "BOT": "BOT", "SUP": "SUP"} # Маппинг для ключей словаря
 
     for i, series_summary in enumerate(series_list): # Цикл по сериям
-        series_id = series_summary.get("id"); if not series_id: continue
+        series_id = series_summary.get("id"); 
+        if not series_id: continue
         prog = (i + 1) / total_series_to_process
         try: progress_bar.progress(prog, text=f"Series {i+1}/{total_series_to_process} ({series_id})")
         except Exception: pass
