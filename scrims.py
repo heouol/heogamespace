@@ -63,12 +63,12 @@ SCRIMS_HEADER = [
 
 # --- DDRagon Helper Functions (Без изменений) ---
 @st.cache_data(ttl=3600)
-get_latest_patch_version():
+def get_latest_patch_version():
     try: response = requests.get("https://ddragon.leagueoflegends.com/api/versions.json", timeout=10); response.raise_for_status(); versions = response.json(); return versions[0] if versions else "14.14.1" # Fallback к известной версии
     except Exception: return "14.14.1" # Fallback к известной версии
 
 @st.cache_data
- normalize_champion_name_for_ddragon(champ):
+def normalize_champion_name_for_ddragon(champ):
     if not champ or champ == "N/A": return None
     ex = {"Nunu & Willump": "Nunu", "Wukong": "MonkeyKing", "Renata Glasc": "Renata", "K'Sante": "KSante"};
     if champ in ex: return ex[champ]
@@ -78,12 +78,12 @@ get_latest_patch_version():
         return name_clean[0].upper() + name_clean[1:]
     return None
 
- get_champion_icon_html(champion, width=25, height=25):
+def get_champion_icon_html(champion, width=25, height=25):
     patch_version = get_latest_patch_version(); norm = normalize_champion_name_for_ddragon(champion)
     if norm: url = f"https://ddragon.leagueoflegends.com/cdn/{patch_version}/img/champion/{norm}.png"; return f'<img src="{url}" width="{width}" height="{height}" alt="{champion}" title="{champion}" style="vertical-align: middle; margin: 1px;">'
     return ""
 
- color_win_rate_scrims(value):
+def color_win_rate_scrims(value):
     try:
         v = float(value)
         if 0 <= v < 48:
@@ -99,7 +99,7 @@ get_latest_patch_version():
 
 # --- Google Sheets Setup (Без изменений) ---
 @st.cache_resource
- setup_google_sheets():
+def setup_google_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]; json_creds_str = os.getenv("GOOGLE_SHEETS_CREDS");
     if not json_creds_str: st.error("GOOGLE_SHEETS_CREDS missing."); return None
     try: creds_dict = json.loads(json_creds_str); creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope); client = gspread.authorize(creds); client.list_spreadsheet_files(); return client
@@ -152,7 +152,7 @@ get_latest_patch_version():
 # --- Функции для работы с GRID API ---
 
 # Вспомогательная функция для вывода логов
- log_message(message, logs_list):
+def log_message(message, logs_list):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     log_entry = f"{timestamp} :: {message}"
     # print(log_entry) # Опционально: вывод в консоль сервера
