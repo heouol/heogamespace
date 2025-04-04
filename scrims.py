@@ -63,7 +63,7 @@ SCRIMS_HEADER = [
 
 # --- DDRagon Helper Functions (Без изменений) ---
 @st.cache_data(ttl=3600)
- get_latest_patch_version():
+get_latest_patch_version():
     try: response = requests.get("https://ddragon.leagueoflegends.com/api/versions.json", timeout=10); response.raise_for_status(); versions = response.json(); return versions[0] if versions else "14.14.1" # Fallback к известной версии
     except Exception: return "14.14.1" # Fallback к известной версии
 
