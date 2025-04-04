@@ -87,14 +87,16 @@ def normalize_champion_name_for_ddragon(champ):
         "Nunu & Willump": "Nunu", # Пример из старой версии
         #"Wukong": "MonkeyKing",    # Пример из старой версии
         "Renata Glasc": "Renata", # Пример из старой версии
-        #"K'Sante": "KSante",       # Пример из старой версии
+        "K'Sante": "KSante",       # Пример из старой версии
         "LeBlanc": "Leblanc",      # API часто дает 'LeBlanc', ddragon хочет 'Leblanc'
         "MissFortune": "MissFortune",# API может дать 'MissFortune', ddragon хочет 'MissFortune'
         "Miss Fortune": "MissFortune", # На случай пробела
         # Добавляйте другие проблемные случаи сюда
         "JarvanIV": "JarvanIV", # Пример, если нужно убедиться в регистре
         "Fiddlesticks": "Fiddlesticks", # Для него обычно проблем нет
-        "DrMundo": "DrMundo", # Для него обычно проблем нет
+        "DrMundo": "DrMundo",
+        "Lee Sin": "LeeSin",
+        "Xin Zhao": "XinZhao"# Для него обычно проблем нет
     }
     # --- КОНЕЦ СЛОВАРЯ ---
 
