@@ -611,13 +611,13 @@ def normalize_player_name(riot_id_game_name):
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Сохраняет KDA/Dmg/CS/Player) ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Исправлено определение результата) ---
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Исправлен SyntaxError) ---
 def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar):
     """
     Скачивает Riot Summary JSON, парсит его, включая KDA/Dmg/CS/PlayerName,
     определяет имя оппонента и результат, и добавляет расширенную строку в таблицу.
     """
-    # (Начало функции без изменений: проверки worksheet, series_list, чтение existing_game_ids...)
     if not worksheet: log_message("Update Error: Invalid Worksheet.", debug_logs); st.error("Invalid Worksheet."); return False
     if not series_list: log_message("No series to process.", debug_logs); st.info("No series to process."); return False
 
@@ -627,13 +627,10 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
         header_to_check = SCRIMS_HEADER if SCRIMS_HEADER else (existing_data[0] if existing_data else [])
         if header_to_check:
             try: game_id_col_index = header_to_check.index("Game ID")
-            except ValueError: log_message("Warn: 'Game ID' column not found in header.", debug_logs); game_id_col_index=1 # Fallback?
-
+            except ValueError: log_message("Warn: 'Game ID' not found in header.", debug_logs); game_id_col_index=1
         existing_game_ids = set(row[game_id_col_index] for row in existing_data[1:] if len(row) > game_id_col_index and row[game_id_col_index]) if len(existing_data) > 1 and game_id_col_index != -1 else set()
         log_message(f"Found {len(existing_game_ids)} existing game IDs.", debug_logs)
-
     except Exception as e: log_message(f"Error reading sheet: {e}", debug_logs); st.error(f"Error reading sheet: {e}"); return False
-
 
     new_rows = []; processed_game_count = 0; skipped_existing_count = 0
     skipped_state_fail_count = 0; skipped_summary_fail_count = 0; skipped_parsing_fail_count = 0
@@ -642,7 +639,12 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
     role_abbr_map = {"TOP": "TOP", "JGL": "JGL", "MID": "MID", "BOT": "BOT", "SUP": "SUP"}
 
     for i, series_summary in enumerate(series_list): # Цикл по сериям
-        series_id = series_summary.get("id"); if not series_id: continue
+        series_id = series_summary.get("id")
+        # --- ИСПРАВЛЕН СИНТАКСИС: if на новой строке ---
+        if not series_id:
+            continue
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
         prog = (i + 1) / total_series_to_process
         try: progress_bar.progress(prog, text=f"Series {i+1}/{total_series_to_process} ({series_id})")
         except Exception: pass
@@ -684,53 +686,35 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
                 if opponent_tags: sorted_tags=sorted(opponent_tags.items(), key=lambda item: item[1], reverse=True); opponent_team_name=sorted_tags[0][0] if sorted_tags[0][1]>=3 else "Opponent"
                 blue_team_name = TEAM_NAME if our_side == 'blue' else opponent_team_name; red_team_name = TEAM_NAME if our_side == 'red' else opponent_team_name
 
-                # --- ИСПРАВЛЕННЫЙ БЛОК ОПРЕДЕЛЕНИЯ РЕЗУЛЬТАТА ---
-                result = "N/A" # Значение по умолчанию
+                result = "N/A" # Определение результата
                 for team_summary in teams_data:
-                    # Ищем запись команды, которая соответствует ID нашей команды
                     if team_summary.get("teamId") == our_team_id:
-                        # Проверяем поле 'win' для нашей команды
                         win_status = team_summary.get("win")
-                        if win_status is True:
-                            result = "Win"
-                        elif win_status is False:
-                            result = "Loss"
-                        else:
-                            # Если поле 'win' отсутствует или имеет странное значение
-                            log_message(f"Warn: 'win' status missing/invalid for team {our_team_id}. G:{game_id}", debug_logs)
-                            result = "Unknown" # Можно использовать 'Unknown' или оставить 'N/A'
-                        # Нашли нашу команду, выходим из цикла
+                        if win_status is True: result = "Win"
+                        elif win_status is False: result = "Loss"
+                        else: log_message(f"Warn: 'win' invalid for {our_team_id}. G:{game_id}", debug_logs); result = "Unknown"
                         break
-                # Если по какой-то причине наша команда не нашлась в teams_data (маловероятно)
-                if result == "N/A":
-                     log_message(f"Warn: Could not find result for our team {our_team_id}. G:{game_id}", debug_logs)
-                # --- КОНЕЦ ИСПРАВЛЕННОГО БЛОКА ---
+                if result == "N/A": log_message(f"Warn: Could not find result for {our_team_id}. G:{game_id}", debug_logs)
 
-                blue_bans = ["N/A"]*5; red_bans = ["N/A"]*5 # Баны (без изменений)
+                blue_bans = ["N/A"]*5; red_bans = ["N/A"]*5 # Баны
                 for team in teams_data:
                     target_bans = blue_bans if team.get("teamId")==100 else red_bans; bans_list = sorted(team.get("bans",[]), key=lambda x: x.get('pickTurn',99))
                     for i, ban in enumerate(bans_list[:5]): target_bans[i] = str(c_id) if (c_id := ban.get("championId", -1)) != -1 else "N/A"
 
-                date_str = "N/A"; duration_str = "N/A" # Дата и длительность (без изменений)
+                date_str = "N/A"; duration_str = "N/A" # Дата и длительность
                 if game_creation_timestamp: try: date_str=datetime.fromtimestamp(game_creation_timestamp/1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") except: pass
                 if game_duration_sec > 0: minutes, seconds = divmod(int(game_duration_sec), 60); duration_str = f"{minutes}:{seconds:02d}"
 
                 row_dict = {hdr: "N/A" for hdr in SCRIMS_HEADER} # Создаем словарь строки
-                row_dict.update({
-                    "Date": date_str, "Patch": patch_str, "Blue Team Name": blue_team_name, "Red Team Name": red_team_name,
-                    "Duration": duration_str, "Result": result, "Game ID": game_id
-                })
+                row_dict.update({ "Date": date_str, "Patch": patch_str, "Blue Team Name": blue_team_name, "Red Team Name": red_team_name, "Duration": duration_str, "Result": result, "Game ID": game_id })
                 for i in range(5): row_dict[f"Blue Ban {i+1} ID"] = blue_bans[i]; row_dict[f"Red Ban {i+1} ID"] = red_bans[i]
 
                 for idx, p in enumerate(participants): # Заполняем данные игроков
                     role_name = roles_in_order[idx % 5]; side_prefix = "Blue" if idx < 5 else "Red"
                     player_col_prefix = f"{side_prefix}_{role_abbr_map[role_name]}"
                     player_name = normalize_player_name(p.get("riotIdGameName")) or "Unknown"; champ_name = p.get("championName", "N/A")
-                    kills = p.get('kills', 0); deaths = p.get('deaths', 0); assists = p.get('assists', 0)
-                    damage = p.get('totalDamageDealtToChampions', 0); cs = p.get('totalMinionsKilled', 0) + p.get('neutralMinionsKilled', 0)
-                    row_dict[f"{player_col_prefix}_Player"] = player_name; row_dict[f"{player_col_prefix}_Champ"] = champ_name
-                    row_dict[f"{player_col_prefix}_K"] = kills; row_dict[f"{player_col_prefix}_D"] = deaths; row_dict[f"{player_col_prefix}_A"] = assists
-                    row_dict[f"{player_col_prefix}_Dmg"] = damage; row_dict[f"{player_col_prefix}_CS"] = cs
+                    kills=p.get('kills',0); deaths=p.get('deaths',0); assists=p.get('assists',0); damage=p.get('totalDamageDealtToChampions',0); cs=p.get('totalMinionsKilled',0)+p.get('neutralMinionsKilled',0)
+                    row_dict[f"{player_col_prefix}_Player"]=player_name; row_dict[f"{player_col_prefix}_Champ"]=champ_name; row_dict[f"{player_col_prefix}_K"]=kills; row_dict[f"{player_col_prefix}_D"]=deaths; row_dict[f"{player_col_prefix}_A"]=assists; row_dict[f"{player_col_prefix}_Dmg"]=damage; row_dict[f"{player_col_prefix}_CS"]=cs
 
                 new_row_data = [row_dict.get(hdr, "N/A") for hdr in SCRIMS_HEADER] # Преобразуем в список
                 new_rows.append(new_row_data); existing_game_ids.add(game_id); processed_game_count += 1
@@ -753,8 +737,6 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
         except Exception as e: error_msg=f"Append rows error: {e}"; log_message(error_msg, debug_logs); st.error(error_msg); return False
     else: st.info("No new records to add."); return False
 # --- Конец функции update_scrims_data ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Патч, Иконки банов, Порядок колонок) ---
 # @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует KDA/Dmg/CS/Duration) ---
