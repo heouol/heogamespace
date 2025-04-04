@@ -605,14 +605,8 @@ def normalize_player_name(riot_id_game_name):
 
 # --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Переписана) ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Добавлен парсинг патча) ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Добавлено определение имени оппонента) ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Сохраняет KDA/Dmg/CS/Player) ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Исправлен SyntaxError) ---
+# --- ОСНОВНАЯ ФУНКЦИЯ ОБНОВЛЕНИЯ ДАННЫХ (Исправлен SyntaxError в дате) ---
 def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar):
     """
     Скачивает Riot Summary JSON, парсит его, включая KDA/Dmg/CS/PlayerName,
@@ -627,7 +621,7 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
         header_to_check = SCRIMS_HEADER if SCRIMS_HEADER else (existing_data[0] if existing_data else [])
         if header_to_check:
             try: game_id_col_index = header_to_check.index("Game ID")
-            except ValueError: log_message("Warn: 'Game ID' not found in header.", debug_logs); game_id_col_index=1
+            except ValueError: log_message("Warn: 'Game ID' column not found in header.", debug_logs); game_id_col_index=1
         existing_game_ids = set(row[game_id_col_index] for row in existing_data[1:] if len(row) > game_id_col_index and row[game_id_col_index]) if len(existing_data) > 1 and game_id_col_index != -1 else set()
         log_message(f"Found {len(existing_game_ids)} existing game IDs.", debug_logs)
     except Exception as e: log_message(f"Error reading sheet: {e}", debug_logs); st.error(f"Error reading sheet: {e}"); return False
@@ -640,10 +634,8 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 
     for i, series_summary in enumerate(series_list): # Цикл по сериям
         series_id = series_summary.get("id")
-        # --- ИСПРАВЛЕН СИНТАКСИС: if на новой строке ---
         if not series_id:
-            continue
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+            continue # Пропускаем серию без ID
 
         prog = (i + 1) / total_series_to_process
         try: progress_bar.progress(prog, text=f"Series {i+1}/{total_series_to_process} ({series_id})")
@@ -689,20 +681,27 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
                 result = "N/A" # Определение результата
                 for team_summary in teams_data:
                     if team_summary.get("teamId") == our_team_id:
-                        win_status = team_summary.get("win")
-                        if win_status is True: result = "Win"
-                        elif win_status is False: result = "Loss"
-                        else: log_message(f"Warn: 'win' invalid for {our_team_id}. G:{game_id}", debug_logs); result = "Unknown"
-                        break
-                if result == "N/A": log_message(f"Warn: Could not find result for {our_team_id}. G:{game_id}", debug_logs)
+                        win_status = team_summary.get("win"); result = "Win" if win_status is True else "Loss" if win_status is False else "Unknown"; break
+                if result == "N/A": log_message(f"Warn: Result N/A for {our_team_id}. G:{game_id}", debug_logs)
 
                 blue_bans = ["N/A"]*5; red_bans = ["N/A"]*5 # Баны
                 for team in teams_data:
                     target_bans = blue_bans if team.get("teamId")==100 else red_bans; bans_list = sorted(team.get("bans",[]), key=lambda x: x.get('pickTurn',99))
                     for i, ban in enumerate(bans_list[:5]): target_bans[i] = str(c_id) if (c_id := ban.get("championId", -1)) != -1 else "N/A"
 
-                date_str = "N/A"; duration_str = "N/A" # Дата и длительность
-                if game_creation_timestamp: try: date_str=datetime.fromtimestamp(game_creation_timestamp/1000, timezone.utc).strftime("%Y-%m-%d %H:%M:%S") except: pass
+                # --- ИСПРАВЛЕН СИНТАКСИС ДЛЯ ДАТЫ ---
+                date_str = "N/A"
+                if game_creation_timestamp:
+                    try:
+                        # Переносим try...except на новые строки
+                        dt_obj=datetime.fromtimestamp(game_creation_timestamp/1000, timezone.utc)
+                        date_str=dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception as e:
+                        log_message(f"Err parsing time {game_creation_timestamp}: {e}", debug_logs)
+                        pass # Оставляем date_str как "N/A" при ошибке
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+                duration_str = "N/A" # Длительность
                 if game_duration_sec > 0: minutes, seconds = divmod(int(game_duration_sec), 60); duration_str = f"{minutes}:{seconds:02d}"
 
                 row_dict = {hdr: "N/A" for hdr in SCRIMS_HEADER} # Создаем словарь строки
