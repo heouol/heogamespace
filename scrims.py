@@ -74,15 +74,65 @@ def get_latest_patch_version():
     except Exception: return "14.14.1" # Fallback к известной версии
 
 @st.cache_data
+@st.cache_data
 def normalize_champion_name_for_ddragon(champ):
-    if not champ or champ == "N/A": return None
-    ex = {"Nunu & Willump": "Nunu", "Wukong": "MonkeyKing", "Renata Glasc": "Renata", "K'Sante": "KSante"};
-    if champ in ex: return ex[champ]
-    # Убираем пробелы и апострофы, капитализируем первую букву
+    """Нормализует имя чемпиона для использования в URL Data Dragon,
+       включая ручные исправления."""
+    if not champ or champ == "N/A":
+        return None
+
+    # --- СЛОВАРЬ РУЧНЫХ ИСПРАВЛЕНИЙ ---
+    # Сюда можно добавлять пары "Имя из API/JSON": "Имя для ddragon"
+    champion_name_overrides = {
+        "Nunu & Willump": "Nunu", # Пример из старой версии
+        "Wukong": "MonkeyKing",    # Пример из старой версии
+        "Renata Glasc": "Renata", # Пример из старой версии
+        "K'Sante": "KSante",       # Пример из старой версии
+        "LeBlanc": "Leblanc",      # API часто дает 'LeBlanc', ddragon хочет 'Leblanc'
+        "MissFortune": "MissFortune",# API может дать 'MissFortune', ddragon хочет 'MissFortune'
+        "Miss Fortune": "MissFortune", # На случай пробела
+        # Добавляйте другие проблемные случаи сюда
+        # "JarvanIV": "JarvanIV", # Пример, если нужно убедиться в регистре
+        # "Fiddlesticks": "Fiddlesticks", # Для него обычно проблем нет
+        # "DrMundo": "DrMundo", # Для него обычно проблем нет
+    }
+    # --- КОНЕЦ СЛОВАРЯ ---
+
+    # Сначала проверяем ручные исправления (с учетом регистра и без)
+    if champ in champion_name_overrides:
+        return champion_name_overrides[champ]
+    # Проверка без учета регистра на всякий случай
+    if champ.lower() in {k.lower(): v for k, v in champion_name_overrides.items()}:
+         # Находим оригинальный ключ по lower() и возвращаем значение
+         for k, v in champion_name_overrides.items():
+              if k.lower() == champ.lower():
+                   return v
+
+    # Если ручных исправлений нет, применяем общую логику
+    # Убираем пробелы, апострофы, точки и т.д., оставляем буквы и цифры
     name_clean = ''.join(c for c in champ if c.isalnum())
+
+    # Важные стандартные замены ddragon (которые не покрываются простой очисткой)
+    ddragon_exceptions = {
+        "khazix": "Khazix",
+        "chogath": "Chogath",
+        "kaisa": "Kaisa",
+        "velkoz": "Velkoz",
+        "reksai": "Reksai",
+    }
+    if name_clean.lower() in ddragon_exceptions:
+        return ddragon_exceptions[name_clean.lower()]
+
+    # Для остальных - первая буква заглавная, остальные строчные (если не число)
     if name_clean:
-        return name_clean[0].upper() + name_clean[1:]
-    return None
+        # Проверяем, нужно ли капитализировать первую букву (для стандартных имен)
+        # Для имен типа 'Kaisa', 'Leblanc' это не нужно, они уже обработаны
+        # Но для 'Ashe', 'Ezreal' и т.д. - нужно.
+        # Простая капитализация может быть недостаточной для имен типа 'MissFortune'.
+        # Используем простую капитализацию как fallback
+        return name_clean[0].upper() + name_clean[1:].lower() # Простой вариант
+
+    return None # Если имя совсем некорректное
 
 def get_champion_icon_html(champion, width=25, height=25):
     patch_version = get_latest_patch_version(); norm = normalize_champion_name_for_ddragon(champion)
@@ -722,21 +772,18 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Патч, Иконки банов, Порядок колонок) ---
 # @st.cache_data(ttl=180)
-def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добавлен аргумент champion_id_map
+def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
     Агрегирует данные из Google Sheet. Отображает Патч, иконки банов.
-    Result и Duration перемещены в конец истории.
+    Result и Duration перемещены в конец истории. Названия команд добавлены.
     Использует переданную карту ID чемпионов.
     """
     if not worksheet:
         st.error("Aggregate Error: Invalid worksheet object.")
         return {}, {}, pd.DataFrame(), {}
 
-    # --- Используем переданную карту чемпионов ---
     if not champion_id_map:
         st.warning("Champion ID map not available for aggregation.")
-        # Можно вернуть пустые данные или продолжить без иконок банов
-        # return {}, {}, pd.DataFrame(), {} # Раскомментировать для остановки
 
     # Инициализация (без изменений)
     blue_stats = {"wins": 0, "losses": 0, "total": 0}
@@ -766,7 +813,14 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
     try: idx_map = {name: i for i, name in enumerate(header)}
     except Exception as e: st.error(f"Failed map creation: {e}"); return {}, {}, pd.DataFrame(), {}
 
-    # Обработка строк (без изменений в логике фильтрации, статистики сторон, статистики игроков)
+    # --- ИЗМЕНЕНО: Добавлены названия команд в порядок отображения ---
+    HISTORY_DISPLAY_ORDER = [
+        "Date", "Patch", "Blue Team Name", "B Bans", "B Picks", # Добавлено Blue Team Name
+        "R Picks", "R Bans", "Red Team Name", "Result", "Duration" # Добавлено Red Team Name
+    ]
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+    # Обработка строк (основная логика без изменений)
     rows_processed_after_filter = 0
     relevant_player_names = set(ROSTER_RIOT_NAME_TO_GRID_ID.keys())
     ROLE_ORDER_FOR_SHEET = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
@@ -792,15 +846,17 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
             is_our_red = (red_team_name == TEAM_NAME)
             if not is_our_blue and not is_our_red: continue
 
+            # Статистика сторон (без изменений)
             if is_our_blue:
-                blue_stats["total"] += 1
+                blue_stats["total"] += 1;
                 if result_our_team == "Win": blue_stats["wins"] += 1;
                 elif result_our_team == "Loss": blue_stats["losses"] += 1;
             else:
-                red_stats["total"] += 1
+                red_stats["total"] += 1;
                 if result_our_team == "Win": red_stats["wins"] += 1;
                 elif result_our_team == "Loss": red_stats["losses"] += 1;
 
+            # Статистика игроков (без изменений)
             our_side_prefix = "Blue" if is_our_blue else "Red"
             is_win = (result_our_team == "Win")
             for role in ROLE_ORDER_FOR_SHEET:
@@ -817,18 +873,17 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
                         player_stats[player_name_on_role][champion]['games'] += 1
                         if is_win: player_stats[player_name_on_role][champion]['wins'] += 1
 
-            # --- Подготовка строки для истории матчей (Используем переданный champion_id_map) ---
+            # Подготовка строки для истории матчей (без изменений в логике, кроме добавления полей в словарь)
             try:
                 bb_icons = []
                 for i in range(1, 6):
                     col_name = f"Blue Ban {i} ID"
                     if col_name in idx_map and idx_map[col_name] < len(row):
                         ban_id = str(row[idx_map[col_name]])
-                        if ban_id and ban_id != "N/A" and ban_id != "-1" and champion_id_map: # Добавлена проверка champion_id_map
+                        if ban_id and ban_id != "N/A" and ban_id != "-1" and champion_id_map:
                              champ_name = champion_id_map.get(ban_id, f"ID:{ban_id}")
                              bb_icons.append(get_champion_icon_html(champ_name))
-                        elif ban_id and ban_id != "N/A" and ban_id != "-1": # Если карты нет, показываем ID
-                             bb_icons.append(f"ID:{ban_id}")
+                        elif ban_id and ban_id != "N/A" and ban_id != "-1": bb_icons.append(f"ID:{ban_id}")
                 bb_html = " ".join(bb_icons) if bb_icons else ""
 
                 rb_icons = []
@@ -836,14 +891,13 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
                      col_name = f"Red Ban {i} ID"
                      if col_name in idx_map and idx_map[col_name] < len(row):
                          ban_id = str(row[idx_map[col_name]])
-                         if ban_id and ban_id != "N/A" and ban_id != "-1" and champion_id_map: # Добавлена проверка champion_id_map
+                         if ban_id and ban_id != "N/A" and ban_id != "-1" and champion_id_map:
                               champ_name = champion_id_map.get(ban_id, f"ID:{ban_id}")
                               rb_icons.append(get_champion_icon_html(champ_name))
-                         elif ban_id and ban_id != "N/A" and ban_id != "-1": # Если карты нет, показываем ID
-                              rb_icons.append(f"ID:{ban_id}")
+                         elif ban_id and ban_id != "N/A" and ban_id != "-1": rb_icons.append(f"ID:{ban_id}")
                 rb_html = " ".join(rb_icons) if rb_icons else ""
 
-                bp_icons = []; rp_icons = [] # Остальная часть без изменений
+                bp_icons = []; rp_icons = []
                 for role in ROLE_ORDER_FOR_SHEET:
                     role_abbr = role_to_abbr[role]
                     b_col_name = f"Actual_Blue_{role_abbr}"; r_col_name = f"Actual_Red_{role_abbr}"
@@ -859,10 +913,11 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
                 patch_val = row[idx_map["Patch"]] if "Patch" in idx_map else "N/A"
                 duration_val = row[idx_map["Duration"]] if "Duration" in idx_map else "N/A"
 
+                # Сохраняем все необходимые поля для последующего отображения
                 history_rows.append({
-                    "Date": date_str, "Patch": patch_val, "Blue Team": blue_team_name,
+                    "Date": date_str, "Patch": patch_val, "Blue Team Name": blue_team_name,
                     "B Bans": bb_html, "B Picks": bp_html, "R Picks": rp_html,
-                    "R Bans": rb_html, "Red Team": red_team_name, "Result": result_our_team,
+                    "R Bans": rb_html, "Red Team Name": red_team_name, "Result": result_our_team,
                     "Duration": duration_val
                 })
             except Exception as hist_err: st.warning(f"Err history row {row_index}: {hist_err}")
@@ -871,24 +926,25 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map): # Добав
     # --- Конец цикла ---
 
     if rows_processed_after_filter == 0 and time_filter != "All Time": st.info(f"No data matching filter: {time_filter}")
-    elif not history_rows and rows_processed_after_filter > 0: st.warning(f"Processed {rows_processed_after_filter} games, but history is empty.")
+    elif not history_rows and rows_processed_after_filter > 0: st.warning(f"Processed {rows_processed_after_filter} games, but history empty.")
 
     df_hist = pd.DataFrame(history_rows)
     if not df_hist.empty:
-        display_cols = HISTORY_DISPLAY_ORDER if 'HISTORY_DISPLAY_ORDER' in globals() else df_hist.columns.tolist()
-        display_cols = [col for col in display_cols if col in df_hist.columns]
-        df_hist = df_hist[display_cols]
+        display_cols = HISTORY_DISPLAY_ORDER # Используем определенный порядок
+        display_cols = [col for col in display_cols if col in df_hist.columns] # Проверка наличия колонок
+        df_hist = df_hist[display_cols] # Применяем порядок
         try:
             df_hist['DT_temp'] = pd.to_datetime(df_hist['Date'], errors='coerce', utc=True)
             df_hist.dropna(subset=['DT_temp'], inplace=True)
             df_hist = df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
         except Exception as sort_ex: st.warning(f"History sort failed: {sort_ex}")
 
+    # Статистика игроков (без изменений)
     final_player_stats = {}
     for player, champ_data in player_stats.items():
         sorted_champs = dict(sorted(champ_data.items(), key=lambda item: item[1].get('games', 0), reverse=True))
         if sorted_champs: final_player_stats[player] = sorted_champs
-    if not final_player_stats and rows_processed_after_filter > 0: st.info(f"Processed {rows_processed_after_filter} games, but no player stats.")
+    if not final_player_stats and rows_processed_after_filter > 0: st.info(f"Processed games, but no player stats.")
 
     return blue_stats, red_stats, df_hist, final_player_stats
 # --- Конец функции aggregate_scrims_data ---
