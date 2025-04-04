@@ -75,67 +75,81 @@ def get_latest_patch_version():
 
 @st.cache_data
 @st.cache_data
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+@st.cache_data
 def normalize_champion_name_for_ddragon(champ):
     """Нормализует имя чемпиона для использования в URL Data Dragon,
-       включая ручные исправления."""
+       включая ручные исправления и сохранение нужного регистра."""
     if not champ or champ == "N/A":
         return None
 
-    # --- СЛОВАРЬ РУЧНЫХ ИСПРАВЛЕНИЙ ---
-    # Сюда можно добавлять пары "Имя из API/JSON": "Имя для ddragon"
+    # --- СЛОВАРЬ РУЧНЫХ ИСПРАВЛЕНИЙ / СОХРАНЕНИЯ РЕГИСТРА ---
+    # Сюда добавляем случаи, где API/JSON имя отличается от ddragon имени,
+    # или где нужно сохранить специфический регистр (CamelCase).
+    # Формат: "Имя_из_API_или_JSON": "Имя_для_ddragon_URL"
     champion_name_overrides = {
-        "Nunu & Willump": "Nunu", # Пример из старой версии
-        #"Wukong": "MonkeyKing",    # Пример из старой версии
-        "Renata Glasc": "Renata", # Пример из старой версии
-        "K'Sante": "KSante",       # Пример из старой версии
-        "LeBlanc": "Leblanc",      # API часто дает 'LeBlanc', ddragon хочет 'Leblanc'
-        "MissFortune": "MissFortune",# API может дать 'MissFortune', ddragon хочет 'MissFortune'
-        "Miss Fortune": "MissFortune", # На случай пробела
-        # Добавляйте другие проблемные случаи сюда
-        "JarvanIV": "JarvanIV", # Пример, если нужно убедиться в регистре
-        "Fiddlesticks": "Fiddlesticks", # Для него обычно проблем нет
+        # Основные исключения
+        "Nunu & Willump": "Nunu",
+        "Wukong": "MonkeyKing",
+        "Renata Glasc": "Renata",
+        "K'Sante": "KSante",
+        "LeBlanc": "Leblanc",
+        "Miss Fortune": "MissFortune",
+        "Jarvan IV": "JarvanIV",
+        "Twisted Fate": "TwistedFate",
+        "Dr. Mundo": "DrMundo",
+        "Xin Zhao": "XinZhao",
+        # Варианты для сохранения регистра или исправления возможных входных данных
+        "MonkeyKing": "MonkeyKing",
+        "KSante": "KSante",
+        "Leblanc": "Leblanc",
+        "MissFortune": "MissFortune",
+        "Jarvaniv": "JarvanIV",
+        "JarvanIV": "JarvanIV",
+        "Twistedfate": "TwistedFate",
+        "TwistedFate": "TwistedFate",
         "DrMundo": "DrMundo",
-        "Lee Sin": "LeeSin",
-        "Xin Zhao": "XinZhao"# Для него обычно проблем нет
+        "Xinzhao": "XinZhao", # Если вдруг придет в нижнем регистре
+        "XinZhao": "XinZhao",
+        # Добавляйте другие по мере необходимости
+        # "Fiddlesticks": "Fiddlesticks", # Обычно не требует изменений
     }
     # --- КОНЕЦ СЛОВАРЯ ---
 
-    # Сначала проверяем ручные исправления (с учетом регистра и без)
+    # 1. Сначала проверяем точное совпадение в словаре
     if champ in champion_name_overrides:
         return champion_name_overrides[champ]
-    # Проверка без учета регистра на всякий случай
-    if champ.lower() in {k.lower(): v for k, v in champion_name_overrides.items()}:
-         # Находим оригинальный ключ по lower() и возвращаем значение
-         for k, v in champion_name_overrides.items():
-              if k.lower() == champ.lower():
-                   return v
 
-    # Если ручных исправлений нет, применяем общую логику
-    # Убираем пробелы, апострофы, точки и т.д., оставляем буквы и цифры
+    # 2. Затем проверяем совпадение без учета регистра
+    champ_lower = champ.lower()
+    for k, v in champion_name_overrides.items():
+        # Сравниваем в нижнем регистре
+        if k.lower() == champ_lower:
+            return v # Возвращаем значение из словаря (с правильным регистром ddragon)
+
+    # 3. Если нет в словаре, применяем общую логику очистки
+    # Удаляем апострофы, точки, пробелы и т.д.
     name_clean = ''.join(c for c in champ if c.isalnum())
 
-    # Важные стандартные замены ddragon (которые не покрываются простой очисткой)
-    ddragon_exceptions = {
+    # 4. Стандартные исключения ddragon для имен с апострофами/т.п. ПОСЛЕ очистки
+    # (на случай, если они не попали в overrides)
+    ddragon_cleaned_exceptions = {
+        # очищенное_имя_в_нижнем_регистре : имя_для_ddragon
         "khazix": "Khazix",
         "chogath": "Chogath",
         "kaisa": "Kaisa",
         "velkoz": "Velkoz",
         "reksai": "Reksai",
     }
-    if name_clean.lower() in ddragon_exceptions:
-        return ddragon_exceptions[name_clean.lower()]
+    if name_clean.lower() in ddragon_cleaned_exceptions:
+        return ddragon_cleaned_exceptions[name_clean.lower()]
 
-    # Для остальных - первая буква заглавная, остальные строчные (если не число)
-    if name_clean:
-        # Проверяем, нужно ли капитализировать первую букву (для стандартных имен)
-        # Для имен типа 'Kaisa', 'Leblanc' это не нужно, они уже обработаны
-        # Но для 'Ashe', 'Ezreal' и т.д. - нужно.
-        # Простая капитализация может быть недостаточной для имен типа 'MissFortune'.
-        # Используем простую капитализацию как fallback
-        return name_clean[0].upper() + name_clean[1:].lower() # Простой вариант
-
-    return None # Если имя совсем некорректное
-
+    # 5. Для всех остальных имен возвращаем очищенное имя "как есть".
+    # Data Dragon обычно чувствителен к регистру (например, 'XinZhao', а не 'Xinzhao').
+    # Простая капитализация первой буквы (как было раньше) может быть неверной.
+    # Поэтому лучше вернуть очищенное имя - если оно совпадает с ожидаемым ddragon, иконка загрузится.
+    return name_clean if name_clean else None
+    
 def get_champion_icon_html(champion, width=25, height=25):
     patch_version = get_latest_patch_version(); norm = normalize_champion_name_for_ddragon(champion)
     if norm: url = f"https://ddragon.leagueoflegends.com/cdn/{patch_version}/img/champion/{norm}.png"; return f'<img src="{url}" width="{width}" height="{height}" alt="{champion}" title="{champion}" style="vertical-align: middle; margin: 1px;">'
