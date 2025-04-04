@@ -106,7 +106,7 @@ def setup_google_sheets():
     except Exception as e: st.error(f"GSheets setup error: {e}"); return None
 
 # --- Worksheet Check/Creation (Адаптировано под новый SCRIMS_HEADER) ---
- check_if_scrims_worksheet_exists(spreadsheet, name):
+def check_if_scrims_worksheet_exists(spreadsheet, name):
     """
     Проверяет существование листа и его заголовок.
     Создает лист с заголовком SCRIMS_HEADER, если он не найден или не соответствует.
