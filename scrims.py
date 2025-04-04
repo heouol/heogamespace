@@ -416,9 +416,9 @@ def get_all_series(api_key, logs_list):
 def get_series_state(series_id, api_key, logs_list):
     """ Получает список игр (id, sequenceNumber) для заданной серии """
     query_template = """
-        {
+        query GetSeriesGames($seriesId: ID!) {
             seriesState (
-                id: "%s"  # Подставляем series_id сюда
+                id: $seriesId
             ) {
                 id
                 games {
@@ -429,19 +429,35 @@ def get_series_state(series_id, api_key, logs_list):
             }
         }
     """
-    query = query_template % series_id # Формируем запрос с ID серии
-    # Эндпоинт для Series State API
-    endpoint = "live-data-feed/series-state/graphql"
+    # Используем переменные GraphQL вместо форматирования строки
+    variables = {"seriesId": series_id}
+    endpoint = "live-data-feed/series-state/graphql" # Эндпоинт для Series State API
 
-    response_data = post_graphql_request(query, endpoint, api_key, logs_list)
+    # --- ИСПРАВЛЕНО: Передаем query_template, variables и logs_list ---
+    response_data = post_graphql_request(
+        query_string=query_template,
+        variables=variables, # Передаем словарь переменных
+        endpoint=endpoint,
+        api_key=api_key,
+        logs_list=logs_list # Передаем список логов
+    )
+    # --- КОНЕЦ ИСПРАВЛЕНИЙ в этой функции ---
 
     if response_data and response_data.get("seriesState") and "games" in response_data["seriesState"]:
         games = response_data["seriesState"]["games"]
+        # Проверяем, что games это список (может быть None, если серия найдена, но игр нет)
+        if games is None:
+            log_message(f"Series {series_id} found, but contains no games (games is null).", logs_list)
+            return []
         log_message(f"Found {len(games)} games in series {series_id}", logs_list)
         return games
+    elif response_data and not response_data.get("seriesState"):
+         log_message(f"No seriesState found in response for series {series_id}. The series might not exist or is inaccessible.", logs_list)
+         return []
     else:
-        log_message(f"Could not find games for series {series_id} in seriesState response.", logs_list)
-        return [] # Возвращаем пустой список, если игры не найдены
+        # Ошибка была залогирована внутри post_graphql_request
+        log_message(f"Could not find games for series {series_id} (seriesState request failed or returned unexpected data).", logs_list)
+        return [] # Возвращаем пустой список при ошибке
 
 # НОВАЯ функция для скачивания Riot Summary данных
 def download_riot_summary_data(series_id, sequence_number, api_key, logs_list):
