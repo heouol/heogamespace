@@ -63,12 +63,12 @@ SCRIMS_HEADER = [
 
 # --- DDRagon Helper Functions (Без изменений) ---
 @st.cache_data(ttl=3600)
-def get_latest_patch_version():
+ get_latest_patch_version():
     try: response = requests.get("https://ddragon.leagueoflegends.com/api/versions.json", timeout=10); response.raise_for_status(); versions = response.json(); return versions[0] if versions else "14.14.1" # Fallback к известной версии
     except Exception: return "14.14.1" # Fallback к известной версии
 
 @st.cache_data
-def normalize_champion_name_for_ddragon(champ):
+ normalize_champion_name_for_ddragon(champ):
     if not champ or champ == "N/A": return None
     ex = {"Nunu & Willump": "Nunu", "Wukong": "MonkeyKing", "Renata Glasc": "Renata", "K'Sante": "KSante"};
     if champ in ex: return ex[champ]
@@ -78,12 +78,12 @@ def normalize_champion_name_for_ddragon(champ):
         return name_clean[0].upper() + name_clean[1:]
     return None
 
-def get_champion_icon_html(champion, width=25, height=25):
+ get_champion_icon_html(champion, width=25, height=25):
     patch_version = get_latest_patch_version(); norm = normalize_champion_name_for_ddragon(champion)
     if norm: url = f"https://ddragon.leagueoflegends.com/cdn/{patch_version}/img/champion/{norm}.png"; return f'<img src="{url}" width="{width}" height="{height}" alt="{champion}" title="{champion}" style="vertical-align: middle; margin: 1px;">'
     return ""
 
-def color_win_rate_scrims(value):
+ color_win_rate_scrims(value):
     try:
         v = float(value)
         if 0 <= v < 48:
@@ -99,14 +99,14 @@ def color_win_rate_scrims(value):
 
 # --- Google Sheets Setup (Без изменений) ---
 @st.cache_resource
-def setup_google_sheets():
+ setup_google_sheets():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]; json_creds_str = os.getenv("GOOGLE_SHEETS_CREDS");
     if not json_creds_str: st.error("GOOGLE_SHEETS_CREDS missing."); return None
     try: creds_dict = json.loads(json_creds_str); creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope); client = gspread.authorize(creds); client.list_spreadsheet_files(); return client
     except Exception as e: st.error(f"GSheets setup error: {e}"); return None
 
 # --- Worksheet Check/Creation (Адаптировано под новый SCRIMS_HEADER) ---
-def check_if_scrims_worksheet_exists(spreadsheet, name):
+ check_if_scrims_worksheet_exists(spreadsheet, name):
     """
     Проверяет существование листа и его заголовок.
     Создает лист с заголовком SCRIMS_HEADER, если он не найден или не соответствует.
@@ -152,7 +152,7 @@ def check_if_scrims_worksheet_exists(spreadsheet, name):
 # --- Функции для работы с GRID API ---
 
 # Вспомогательная функция для вывода логов
-def log_message(message, logs_list):
+ log_message(message, logs_list):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     log_entry = f"{timestamp} :: {message}"
     # print(log_entry) # Опционально: вывод в консоль сервера
@@ -160,7 +160,9 @@ def log_message(message, logs_list):
         logs_list.append(log_entry)
 
 # Функция для выполнения GraphQL запросов (адаптировано из lol_basic_parser.py)
+# Убедитесь, что ваша функция начинается именно так:
 def post_graphql_request(query_string, variables, endpoint, api_key, logs_list, retries=3, initial_delay=1):
+    # ... остальной код функции ...
     """ Отправляет GraphQL POST запрос с обработкой ошибок и повторами """
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     # --- ИСПРАВЛЕНО: Формируем payload с query и variables ---
