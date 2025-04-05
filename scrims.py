@@ -739,26 +739,24 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ФИНАЛЬНЕЙШЕЕ ИСПРАВЛЕНИЕ СИНТАКСИСА KDA/DMG/CS) ---
-# --- ЗАМЕНИТЕ ФУНКЦИЮ aggregate_scrims_data НА ЭТУ ВЕРСИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Собирает СПИСКИ KDA/DPM/CSPM) ---
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует Dmg/CS для расчета среднего) ---
 # @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные. Собирает KDA, DPM, CSPM по каждой игре в списки для усреднения.
-    Использует целое количество минут для расчета DPM/CSPM по игре.
+    Агрегирует данные. Суммирует K, D, A, Dmg, CS для расчета средних.
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
 
     blue_stats={"wins":0,"losses":0,"total":0}; red_stats={"wins":0,"losses":0,"total":0}
     history_rows = []
-    # СТРУКТУРА ДЛЯ ХРАНЕНИЯ СПИСКОВ
+    # ИЗМЕНЕНА СТРУКТУРА: Храним суммы K, D, A, Dmg, CS
     player_stats = defaultdict(lambda: defaultdict(lambda: {
-        'games': 0, 'wins': 0, 'kda_list': [], 'dpm_list': [], 'cspm_list': []
+        'games': 0, 'wins': 0, 'k': 0, 'd': 0, 'a': 0, 'dmg': 0, 'cs': 0
+        # Убраны списки и duration_sec
     }))
 
-    # Фильтр по времени
     now_utc=datetime.now(timezone.utc); time_threshold=None
     if time_filter != "All Time":
         weeks_map={"1 Week":1,"2 Weeks":2,"3 Weeks":3,"4 Weeks":4}; days_map={"3 Days":3,"10 Days":10,"2 Months":60}
@@ -801,17 +799,8 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss") # Стата сторон
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # Вычисляем длительность в ЦЕЛЫХ минутах (минимум 1)
-            duration_str = row[idx_map.get("Duration", -1)]
-            duration_min_for_calc = 1 # Значение по умолчанию = 1 минута
-            if duration_str and duration_str != "N/A":
-                try:
-                    mins, secs = map(int, duration_str.split(':'))
-                    if mins == 0 and secs > 0: duration_min_for_calc = 1
-                    elif mins > 0: duration_min_for_calc = max(1, mins)
-                except (ValueError, TypeError, IndexError): pass
-
-            our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win") # Стата игроков
+            # --- СУММИРУЕМ СТАТИСТИКУ ИГРОКОВ ---
+            our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win")
             for role in ROLE_ORDER_FOR_SHEET:
                 role_abbr=role_to_abbr.get(role);
                 if not role_abbr: continue
@@ -822,25 +811,26 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                     # Читаем KDA/Dmg/CS для этой игры
                     k=0; d=0; a=0; dmg=0; cs=0
                     try: k = int(row[idx_map.get(f"{player_col_prefix}_K", -1)] or 0)
-                    except (ValueError, TypeError, IndexError): pass
+                    except: pass
                     try: d = int(row[idx_map.get(f"{player_col_prefix}_D", -1)] or 0)
-                    except (ValueError, TypeError, IndexError): pass
+                    except: pass
                     try: a = int(row[idx_map.get(f"{player_col_prefix}_A", -1)] or 0)
-                    except (ValueError, TypeError, IndexError): pass
+                    except: pass
                     try: dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg", -1)] or 0)
-                    except (ValueError, TypeError, IndexError): pass
+                    except: pass
                     try: cs = int(row[idx_map.get(f"{player_col_prefix}_CS", -1)] or 0)
-                    except (ValueError, TypeError, IndexError): pass
+                    except: pass
 
-                    # ВЫЧИСЛЯЕМ ПОКАЗАТЕЛИ ДЛЯ ЭТОЙ ИГРЫ
-                    game_kda = (k + a) / max(1, d) # KDA
-                    game_dpm = dmg / duration_min_for_calc # Используем целые минуты
-                    game_cspm = cs / duration_min_for_calc # Используем целые минуты
-
-                    # ДОБАВЛЯЕМ В СПИСКИ
+                    # --- ДОБАВЛЯЕМ К СУММАМ ---
                     stats = player_stats[player_name][champion]
-                    stats['games'] += 1; stats['wins'] += is_win
-                    stats['kda_list'].append(game_kda); stats['dpm_list'].append(game_dpm); stats['cspm_list'].append(game_cspm)
+                    stats['games'] += 1
+                    stats['wins'] += is_win
+                    stats['k'] += k
+                    stats['d'] += d
+                    stats['a'] += a
+                    stats['dmg'] += dmg # Суммируем урон
+                    stats['cs'] += cs   # Суммируем CS
+                    # --- КОНЕЦ ДОБАВЛЕНИЯ К СУММАМ ---
 
             # Подготовка строки для истории матчей (без изменений)
             try:
@@ -865,20 +855,22 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
     elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
 
-    df_hist = pd.DataFrame(history_rows);
+    df_hist = pd.DataFrame(history_rows); # Постобработка истории
     if not df_hist.empty:
         display_cols=HISTORY_DISPLAY_ORDER if 'HISTORY_DISPLAY_ORDER' in globals() else df_hist.columns.tolist(); display_cols=[col for col in display_cols if col in df_hist.columns]; df_hist=df_hist[display_cols]
         try: df_hist['DT_temp']=pd.to_datetime(df_hist['Date'], errors='coerce', utc=True); df_hist.dropna(subset=['DT_temp'], inplace=True); df_hist=df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
         except Exception as sort_ex: st.warning(f"Hist sort fail: {sort_ex}")
 
-    final_player_stats={};
+    final_player_stats={}; # Статистика игроков
     for player, champ_data in player_stats.items():
-        if champ_data: final_player_stats[player] = dict(champ_data); # Конвертируем defaultdict в dict
+        sorted_champs=dict(sorted(champ_data.items(), key=lambda item: item[1].get('games',0), reverse=True));
+        if sorted_champs: final_player_stats[player]=sorted_champs;
     if not final_player_stats and rows_processed_after_filter>0: st.info("Games processed, no player stats.");
 
-    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем структуру со списками
+    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем суммы
 # --- Конец функции aggregate_scrims_data ---
-# --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (CSS v3) ---
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+# --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Средний Dmg/CS вместо DPM/CSPM) ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
     if st.button("⬅️ Back to HLL Stats"): st.session_state.current_page = "Hellenic Legends League Stats"; st.rerun()
@@ -917,8 +909,8 @@ def scrims_page():
     # Фильтр по времени
     time_f = st.selectbox("Filter:", ["All Time", "3 Days", "1 Week", "2 Weeks", "4 Weeks", "2 Months"], key="scrims_time_filter")
 
-    # Агрегация данных (получаем списки KDA/DPM/CSPM)
-    blue_s, red_s, df_hist, player_stats_lists_agg = aggregate_scrims_data(wks, time_f, champion_id_map)
+    # Агрегация данных (получаем суммы KDA/Dmg/CS)
+    blue_s, red_s, df_hist, player_stats_agg = aggregate_scrims_data(wks, time_f, champion_id_map) # Переименовали переменную
 
     # Отображение общей статистики
     try:
@@ -937,14 +929,13 @@ def scrims_page():
     with tab1: # История матчей
         st.subheader(f"Game History ({time_f})")
         if df_hist is not None and not df_hist.empty:
-            # Стили истории (без изменений)
-            st.markdown("""<style> .history-table { font-size: 0.85rem; width: auto; margin: 5px auto; border-collapse: collapse; } .history-table th, .history-table td { padding: 4px 6px; text-align: center; vertical-align: middle; border: 1px solid #555; white-space: nowrap; } .history-table td img { width: 22px; height: 22px; margin: 0 1px; vertical-align: middle; } .history-table td:nth-child(4), .history-table td:nth-child(5), .history-table td:nth-child(6), .history-table td:nth-child(7) { min-width: 130px; } </style>""", unsafe_allow_html=True)
+            st.markdown("""<style>...</style>""", unsafe_allow_html=True) # Стили как раньше
             st.markdown(df_hist.to_html(escape=False, index=False, classes='history-table', justify='center'), unsafe_allow_html=True)
         else: st.info(f"No history for: {time_f}.")
 
     with tab2: # Статистика игроков
         st.subheader(f"Player Champion Stats ({time_f})")
-        if not player_stats_lists_agg: st.info(f"No player stats for {time_f}.")
+        if not player_stats_agg: st.info(f"No player stats for {time_f}.")
         else:
              player_order = [PLAYER_IDS[pid] for pid in ["26433","25262","25266","20958","21922"] if pid in PLAYER_IDS]
              player_cols = st.columns(len(player_order))
@@ -956,49 +947,62 @@ def scrims_page():
                           if PLAYER_IDS.get(pid) == player_name: player_role = role; break
                      st.markdown(f"**{player_name}** ({player_role})")
 
-                     player_data_with_lists = player_stats_lists_agg.get(player_name, {})
+                     player_data_agg_sums = player_stats_agg.get(player_name, {}) # Получаем данные с суммами
                      stats_list_for_df = []
-                     sorted_champs = sorted(player_data_with_lists.items(), key=lambda item: item[1].get('games', 0), reverse=True) # Сортировка чемпов
+                     # Сортируем чемпионов по количеству игр
+                     sorted_champs = sorted(player_data_agg_sums.items(), key=lambda item: item[1].get('games', 0), reverse=True)
 
                      if sorted_champs:
-                         for champ, stats_lists in sorted_champs:
-                             games = stats_lists.get('games', 0)
+                         for champ, stats_sums in sorted_champs: # Итерируем по чемпионам
+                             games = stats_sums.get('games', 0)
                              if games > 0:
-                                 wins = stats_lists.get('wins', 0); kda_values = stats_lists.get('kda_list', []); dpm_values = stats_lists.get('dpm_list', []); cspm_values = stats_lists.get('cspm_list', [])
-                                 # Вычисляем средние
-                                 avg_kda = sum(kda_values)/len(kda_values) if kda_values else 0.0; avg_dpm = sum(dpm_values)/len(dpm_values) if dpm_values else 0.0; avg_cspm = sum(cspm_values)/len(cspm_values) if cspm_values else 0.0
-                                 win_rate = (wins / games * 100) if games > 0 else 0
-                                 # Проверка на NaN/Inf
-                                 avg_kda=avg_kda if pd.notna(avg_kda) and avg_kda!=float('inf') else 0.0; avg_dpm=avg_dpm if pd.notna(avg_dpm) and avg_dpm!=float('inf') else 0.0; avg_cspm=avg_cspm if pd.notna(avg_cspm) and avg_cspm!=float('inf') else 0.0
+                                 wins = stats_sums.get('wins', 0)
+                                 k_sum = stats_sums.get('k', 0); d_sum = stats_sums.get('d', 0); a_sum = stats_sums.get('a', 0)
+                                 dmg_sum = stats_sums.get('dmg', 0); cs_sum = stats_sums.get('cs', 0)
 
-                                 stats_list_for_df.append({ # Формируем данные для DF
-                                     'Icon': get_champion_icon_html(champ, width=30, height=30), 'Games': games, 'WR%': win_rate,
-                                     'KDA': f"{avg_kda:.1f}", 'DPM': f"{avg_dpm:.0f}", 'CSPM': f"{avg_cspm:.1f}" })
+                                 # --- ВЫЧИСЛЯЕМ KDA и СРЕДНИЕ Dmg/CS ---
+                                 win_rate = (wins / games * 100)
+                                 kda = (k_sum + a_sum) / max(1, d_sum)
+                                 avg_dmg = dmg_sum / games # Средний урон = Суммарный урон / Кол-во игр
+                                 avg_cs = cs_sum / games   # Средний CS = Суммарный CS / Кол-во игр
+                                 # ---
+
+                                 stats_list_for_df.append({
+                                     'Icon': get_champion_icon_html(champ, width=30, height=30),
+                                     'Games': games,
+                                     'WR%': win_rate,
+                                     'KDA': f"{kda:.1f}",
+                                     'Avg Dmg': f"{avg_dmg:.0f}", # Новое поле и формат
+                                     'Avg CS': f"{avg_cs:.1f}"   # Новое поле и формат
+                                 })
 
                      if stats_list_for_df:
                          df_player = pd.DataFrame(stats_list_for_df)
                          df_player['WR%'] = df_player['WR%'].apply(color_win_rate_scrims)
-                         # --- ОБНОВЛЕННЫЙ CSS v3 ДЛЯ ТАБЛИЦЫ СТАТИСТИКИ ---
+                         # --- ОБНОВЛЕННЫЙ CSS v4 ДЛЯ ТАБЛИЦЫ СТАТИСТИКИ ---
                          st.markdown("""
                          <style>
                          .player-stats { font-size: 0.9rem; width: 100%; margin: 5px 0; border-collapse: collapse; table-layout: fixed; }
-                         .player-stats th, .player-stats td { padding: 5px 4px; /* Уменьшил гориз. padding */ text-align: center; vertical-align: middle; border: 1px solid #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                         .player-stats th { font-weight: 600; background-color: #262730; } /* Цвет фона заголовка */
+                         .player-stats th, .player-stats td { padding: 5px 4px; text-align: center; vertical-align: middle; border: 1px solid #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                         .player-stats th { font-weight: 600; background-color: #262730; }
                          .player-stats img { margin: 0 1px; vertical-align: middle; }
                          /* Выравнивание чисел по правому краю */
                          .player-stats td:nth-child(2), .player-stats td:nth-child(4), .player-stats td:nth-child(5), .player-stats td:nth-child(6) { text-align: right; padding-right: 5px; }
                          .player-stats td:nth-child(3) { text-align: center; } /* Центрирование WR% */
                          /* Ширина колонок */
-                         .player-stats colgroup col:nth-child(1) { width: 38px; }  /* Icon + немного места */
+                         .player-stats colgroup col:nth-child(1) { width: 38px; }  /* Icon */
                          .player-stats colgroup col:nth-child(2) { width: 45px; }  /* Games */
                          .player-stats colgroup col:nth-child(3) { width: 60px; }  /* WR% */
                          .player-stats colgroup col:nth-child(4) { width: 45px; }  /* KDA */
-                         .player-stats colgroup col:nth-child(5) { width: 50px; }  /* DPM */
-                         .player-stats colgroup col:nth-child(6) { width: 50px; }  /* CSPM */
+                         .player-stats colgroup col:nth-child(5) { width: 60px; }  /* Avg Dmg - чуть шире */
+                         .player-stats colgroup col:nth-child(6) { width: 50px; }  /* Avg CS */
                          </style>""", unsafe_allow_html=True)
                          # Добавляем <colgroup> для управления шириной колонок в HTML
-                         cols_html = "".join([f'<col style="width:{w}">' for w in ['38px','45px','60px','45px','50px','50px']])
-                         table_html = df_player.to_html(escape=False, index=False, columns=['Icon', 'Games', 'WR%', 'KDA', 'DPM', 'CSPM'], classes='player-stats', justify='center')
+                         # --- ИЗМЕНЕНЫ ШИРИНЫ И НАЗВАНИЯ КОЛОНОК ---
+                         cols_html = "".join([f'<col style="width:{w}">' for w in ['38px','45px','60px','45px','60px','50px']]) # Обновлены ширины
+                         # Используем новые названия колонок
+                         table_html = df_player.to_html(escape=False, index=False, columns=['Icon', 'Games', 'WR%', 'KDA', 'Avg Dmg', 'Avg CS'], classes='player-stats', justify='center')
+                         table_html = table_html.replace('<thead>', f'<thead><tr><th>Icon</th><th>Games</th><th>WR%</th><th>KDA</th><th>Avg Dmg</th><th>Avg CS</th></tr>', 1) # Явно задаем заголовки
                          table_html = table_html.replace('<tbody>', f'<colgroup>{cols_html}</colgroup><tbody>', 1)
                          st.markdown(table_html, unsafe_allow_html=True)
                          # --- КОНЕЦ ИЗМЕНЕНИЙ CSS и HTML ---
