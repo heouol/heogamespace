@@ -740,47 +740,73 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует KDA/Dmg/CS/Duration) ---
 # @st.cache_data(ttl=180)
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ДОБАВЛЕНО ЛОГИРОВАНИЕ ЗАГОЛОВКА) ---
+# @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует расширенные данные из Google Sheet.
-    Суммирует K, D, A, Dmg, CS, Duration для расчета средних KDA, DPM, CSPM.
+    Агрегирует данные из Google Sheet. Логирует заголовок для отладки KeyError.
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
-    if not champion_id_map: st.warning("Agg Warn: Champion ID map unavailable.")
+    if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
 
-    blue_stats = {"wins": 0, "losses": 0, "total": 0}; red_stats = {"wins": 0, "losses": 0, "total": 0}
+    blue_stats={"wins":0,"losses":0,"total":0}; red_stats={"wins":0,"losses":0,"total":0}
     history_rows = []
-    # НОВАЯ СТРУКТУРА: { player: { champ: {games, wins, k, d, a, dmg, cs, duration_sec} } }
-    player_stats = defaultdict(lambda: defaultdict(lambda: {
-        'games': 0, 'wins': 0, 'k': 0, 'd': 0, 'a': 0, 'dmg': 0, 'cs': 0, 'duration_sec': 0.0
-    }))
+    player_stats = defaultdict(lambda: defaultdict(lambda: {'games':0,'wins':0,'k':0,'d':0,'a':0,'dmg':0,'cs':0,'duration_sec':0.0}))
 
-    # Фильтр по времени (без изменений)
-    now_utc = datetime.now(timezone.utc); time_threshold = None
+    now_utc=datetime.now(timezone.utc); time_threshold=None
     if time_filter != "All Time":
         weeks_map={"1 Week":1,"2 Weeks":2,"3 Weeks":3,"4 Weeks":4}; days_map={"3 Days":3,"10 Days":10,"2 Months":60}
-        if time_filter in weeks_map: time_threshold = now_utc - timedelta(weeks=weeks_map[time_filter])
-        elif time_filter in days_map: time_threshold = now_utc - timedelta(days=days_map[time_filter])
+        if time_filter in weeks_map: time_threshold=now_utc-timedelta(weeks=weeks_map[time_filter])
+        elif time_filter in days_map: time_threshold=now_utc-timedelta(days=days_map[time_filter])
 
     try: data = worksheet.get_all_values()
-    except Exception as e: st.error(f"Read error agg: {e}"); return {}, {}, pd.DataFrame(), {}
+    except Exception as e: st.error(f"Read err agg: {e}"); return {}, {}, pd.DataFrame(), {}
     if len(data) <= 1: st.info("No data in sheet."); return {}, {}, pd.DataFrame(), {}
 
     header = data[0]
-    # ВАЖНО: Убедитесь, что SCRIMS_HEADER в коде СООТВЕТСТВУЕТ реальному заголовку в таблице
-    if header != SCRIMS_HEADER: st.error(f"Header mismatch agg."); return {}, {}, pd.DataFrame(), {}
-    try: idx_map = {name: i for i, name in enumerate(header)}
+    # --- ОТЛАДКА: Выводим заголовок, прочитанный из таблицы ---
+    st.warning("--- DEBUG: Header Read from Sheet ---")
+    st.code(f"Type: {type(header)}\nLength: {len(header)}\nContent:\n{header}", language=None)
+    # --- КОНЕЦ ОТЛАДКИ ---
+
+    # Проверка на соответствие заголовка в коде
+    if header != SCRIMS_HEADER:
+        st.error("Header mismatch detected! Cannot proceed safely.")
+        st.warning("--- Header Expected by Code (SCRIMS_HEADER) ---")
+        st.code(f"Length: {len(SCRIMS_HEADER)}\nContent:\n{SCRIMS_HEADER}", language=None)
+        return {}, {}, pd.DataFrame(), {} # Останавливаем выполнение
+    else:
+        # Убрали st.info, чтобы не засорять вывод, если все ок
+        pass # Заголовок совпадает, продолжаем
+
+    try:
+        idx_map = {name: i for i, name in enumerate(header)}
+        # Проверяем наличие КЛЮЧЕВОГО столбца в карте после создания
+        if "Actual_Blue_TOP" not in idx_map:
+            # Эта ошибка не должна возникать, если проверка выше прошла, но добавим на всякий случай
+            st.error("CRITICAL DEBUG: 'Actual_Blue_TOP' key is MISSING from idx_map even after header check passed!")
+            st.warning("Problematic header was:")
+            st.code(f"{header}", language=None)
+            return {}, {}, pd.DataFrame(), {}
+
     except Exception as e: st.error(f"Map creation fail: {e}"); return {}, {}, pd.DataFrame(), {}
 
     rows_processed_after_filter = 0
     relevant_player_names = set(ROSTER_RIOT_NAME_TO_GRID_ID.keys())
     ROLE_ORDER_FOR_SHEET = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
     role_to_abbr = {"TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUP"}
+    HISTORY_DISPLAY_ORDER = [ # Перенес определение сюда, чтобы было доступно ниже
+        "Date", "Patch", "Blue Team Name", "B Bans", "B Picks",
+        "R Picks", "R Bans", "Red Team Name", "Result", "Duration"
+    ]
 
-    for row_index, row in enumerate(data[1:], start=2): # Обработка строк
+    # --- Обработка строк ---
+    for row_index, row in enumerate(data[1:], start=2):
         if len(row) < len(header): continue # Пропускаем короткие строки
         try:
-            date_str = row[idx_map["Date"]]; passes_time_filter = True # Фильтр времени
+            # Фильтр времени (без изменений)
+            date_str = row[idx_map["Date"]]; passes_time_filter = True
             if time_threshold and date_str != "N/A":
                 try: date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
                 except ValueError: passes_time_filter = False
@@ -789,99 +815,87 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if not passes_time_filter: continue
             rows_processed_after_filter += 1
 
-            blue_team_name = row[idx_map["Blue Team Name"]]; red_team_name = row[idx_map["Red Team Name"]]
-            result_our_team = row[idx_map["Result"]]
-            is_our_blue = (blue_team_name == TEAM_NAME); is_our_red = (red_team_name == TEAM_NAME)
+            # Определение команды и результата (без изменений)
+            blue_team_name=row[idx_map["Blue Team Name"]]; red_team_name=row[idx_map["Red Team Name"]]
+            result_our_team=row[idx_map["Result"]]; is_our_blue=(blue_team_name==TEAM_NAME); is_our_red=(red_team_name==TEAM_NAME)
             if not is_our_blue and not is_our_red: continue
 
             # Статистика сторон (без изменений)
-            if is_our_blue: blue_stats["total"] += 1; blue_stats["wins"] += (result_our_team == "Win"); blue_stats["losses"] += (result_our_team == "Loss")
-            else: red_stats["total"] += 1; red_stats["wins"] += (result_our_team == "Win"); red_stats["losses"] += (result_our_team == "Loss")
+            if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss")
+            else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # --- СУММИРУЕМ СТАТИСТИКУ ИГРОКОВ ---
-            our_side_prefix = "Blue" if is_our_blue else "Red"
-            is_win = (result_our_team == "Win")
-            # Получаем длительность игры в секундах для расчета /min
-            duration_str = row[idx_map["Duration"]]; duration_sec = 0.0
-            if duration_str and duration_str != "N/A":
-                 try: mins, secs = map(int, duration_str.split(':')); duration_sec = float(mins * 60 + secs)
-                 except: pass # Оставляем 0, если формат не M:SS
-
+            # Суммирование статистики игроков (без изменений)
+            our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win")
+            duration_str=row[idx_map["Duration"]]; duration_sec=0.0
+            if duration_str and duration_str!="N/A": try: mins, secs=map(int, duration_str.split(':')); duration_sec=float(mins*60+secs) except: pass
             for role in ROLE_ORDER_FOR_SHEET:
-                role_abbr = role_to_abbr.get(role);
+                role_abbr=role_to_abbr.get(role);
                 if not role_abbr: continue
-                player_col_prefix = f"{our_side_prefix}_{role_abbr}"
+                player_col_prefix=f"{our_side_prefix}_{role_abbr}"
+                # Используем .get на idx_map для большей безопасности
+                player_name=row[idx_map.get(f"{player_col_prefix}_Player", -1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ", -1)]
+                try: k=int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0) except: k=0
+                try: d=int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0) except: d=0
+                try: a=int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0) except: a=0
+                try: dmg=int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0) except: dmg=0
+                try: cs=int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0) except: cs=0
+                if player_name in relevant_player_names and champion and champion!="N/A":
+                    stats=player_stats[player_name][champion]; stats['games']+=1; stats['wins']+=is_win; stats['k']+=k; stats['d']+=d; stats['a']+=a; stats['dmg']+=dmg; stats['cs']+=cs; stats['duration_sec']+=duration_sec
 
-                # Извлекаем данные из колонок
-                player_name = row[idx_map.get(f"{player_col_prefix}_Player", -1)]
-                champion = row[idx_map.get(f"{player_col_prefix}_Champ", -1)]
-                try: k = int(row[idx_map.get(f"{player_col_prefix}_K", -1)] or 0)
-                except (ValueError, TypeError): k = 0
-                try: d = int(row[idx_map.get(f"{player_col_prefix}_D", -1)] or 0)
-                except (ValueError, TypeError): d = 0
-                try: a = int(row[idx_map.get(f"{player_col_prefix}_A", -1)] or 0)
-                except (ValueError, TypeError): a = 0
-                try: dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg", -1)] or 0)
-                except (ValueError, TypeError): dmg = 0
-                try: cs = int(row[idx_map.get(f"{player_col_prefix}_CS", -1)] or 0)
-                except (ValueError, TypeError): cs = 0
-
-                # Проверяем, наш ли это игрок и есть ли чемпион
-                if player_name in relevant_player_names and champion and champion != "N/A":
-                    stats = player_stats[player_name][champion] # Получаем ссылку на словарь статы
-                    stats['games'] += 1
-                    if is_win: stats['wins'] += 1
-                    stats['k'] += k
-                    stats['d'] += d
-                    stats['a'] += a
-                    stats['dmg'] += dmg
-                    stats['cs'] += cs
-                    stats['duration_sec'] += duration_sec # Суммируем длительность игр на этом чемпе
-
-            # --- Подготовка строки для истории матчей (без изменений) ---
+            # --- Подготовка строки для истории матчей (блок try...except вокруг него) ---
             try:
-                bb_icons = []; rb_icons = [] # Иконки банов
-                if champion_id_map: # Генерируем иконки, только если карта есть
-                    for i in range(1,6): ban_id=str(row[idx_map[f"Blue Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id, f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
-                    for i in range(1,6): ban_id=str(row[idx_map[f"Red Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id, f"ID:{ban_id}"); rb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
+                bb_icons=[]; rb_icons=[] # Иконки банов
+                if champion_id_map:
+                    for i in range(1,6): ban_id=str(row[idx_map[f"Blue Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
+                    for i in range(1,6): ban_id=str(row[idx_map[f"Red Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); rb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
                 bb_html=" ".join(filter(None, bb_icons)); rb_html=" ".join(filter(None, rb_icons))
 
                 bp_icons=[]; rp_icons=[] # Иконки пиков
                 for role in ROLE_ORDER_FOR_SHEET:
-                    b_champ=row[idx_map[f"Actual_Blue_{role_to_abbr[role]}"]]; r_champ=row[idx_map[f"Actual_Red_{role_to_abbr[role]}"]]
-                    if b_champ not in ["N/A",None]: bp_icons.append(get_champion_icon_html(b_champ))
-                    if r_champ not in ["N/A",None]: rp_icons.append(get_champion_icon_html(r_champ))
+                    role_abbr=role_to_abbr[role]
+                    b_champ=row[idx_map[f"Actual_Blue_{role_abbr}"]]; r_champ=row[idx_map[f"Actual_Red_{role_abbr}"]] # Используем idx_map здесь напрямую
+                    if b_champ not in ["N/A",None,""]: bp_icons.append(get_champion_icon_html(b_champ)) # Добавлена проверка на пустую строку
+                    if r_champ not in ["N/A",None,""]: rp_icons.append(get_champion_icon_html(r_champ)) # Добавлена проверка на пустую строку
                 bp_html=" ".join(bp_icons); rp_html=" ".join(rp_icons)
 
-                patch_val = row[idx_map["Patch"]]; duration_val = row[idx_map["Duration"]] # Патч и длительность
+                patch_val=row[idx_map["Patch"]]; duration_val=row[idx_map["Duration"]]
 
-                history_rows.append({ # Формируем словарь для истории
+                history_rows.append({ # Формируем словарь истории
                     "Date": date_str, "Patch": patch_val, "Blue Team Name": blue_team_name,
                     "B Bans": bb_html, "B Picks": bp_html, "R Picks": rp_html,
                     "R Bans": rb_html, "Red Team Name": red_team_name, "Result": result_our_team,
                     "Duration": duration_val
                 })
-            except Exception as hist_err: st.warning(f"Hist err r.{row_index}: {hist_err}")
+            except KeyError as hist_key_err:
+                 # Логируем ошибку KeyError и выводим проблемный ключ
+                 st.warning(f"HISTORY KEY ERROR r.{row_index}: Missing key '{hist_key_err}' when creating history row. Check sheet header!")
+                 # Пропускаем добавление этой строки в историю
+                 continue
+            except Exception as hist_err:
+                 st.warning(f"Hist err r.{row_index}: {hist_err}")
+                 # Пропускаем добавление этой строки в историю
+                 continue
 
         except Exception as e_inner: st.warning(f"Proc err r.{row_index}: {e_inner}"); continue
-    # --- Конец цикла ---
+    # --- Конец цикла for ---
 
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
-    elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
+    elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty. Check warnings/errors above.")
 
-    df_hist = pd.DataFrame(history_rows) # Постобработка истории
+    df_hist = pd.DataFrame(history_rows); # Постобработка истории
     if not df_hist.empty:
         display_cols=HISTORY_DISPLAY_ORDER if 'HISTORY_DISPLAY_ORDER' in globals() else df_hist.columns.tolist()
         display_cols=[col for col in display_cols if col in df_hist.columns]; df_hist = df_hist[display_cols]
         try: df_hist['DT_temp']=pd.to_datetime(df_hist['Date'], errors='coerce', utc=True); df_hist.dropna(subset=['DT_temp'], inplace=True); df_hist=df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
         except Exception as sort_ex: st.warning(f"Hist sort fail: {sort_ex}")
 
-    # Конвертируем defaultdict в обычный dict для возврата
-    final_player_stats = {player: dict(champions) for player, champions in player_stats.items()}
-    # Сортировка чемпионов внутри каждого игрока (делаем в scrims_page)
-    if not final_player_stats and rows_processed_after_filter > 0: st.info("Games processed, no player stats.")
+    final_player_stats={}; # Статистика игроков
+    for player, champ_data in player_stats.items():
+        sorted_champs=dict(sorted(champ_data.items(), key=lambda item: item[1].get('games',0), reverse=True));
+        if sorted_champs: final_player_stats[player]=sorted_champs;
+    if not final_player_stats and rows_processed_after_filter>0: st.info("Games processed, no player stats.");
 
-    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем суммы
+    return blue_stats, red_stats, df_hist, final_player_stats
 # --- Конец функции aggregate_scrims_data ---
 
 # --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Адаптирована) ---
