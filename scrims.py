@@ -742,20 +742,19 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует Dmg/CS для расчета среднего) ---
 # @st.cache_data(ttl=180)
+# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Добавлена Отладка чтения KDA/Dmg/CS) ---
+# @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные. Суммирует K, D, A, Dmg, CS для расчета средних.
+    Агрегирует данные. Суммирует KDA/Dmg/CS. Добавлена отладка чтения этих значений.
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
 
     blue_stats={"wins":0,"losses":0,"total":0}; red_stats={"wins":0,"losses":0,"total":0}
     history_rows = []
-    # ИЗМЕНЕНА СТРУКТУРА: Храним суммы K, D, A, Dmg, CS
-    player_stats = defaultdict(lambda: defaultdict(lambda: {
-        'games': 0, 'wins': 0, 'k': 0, 'd': 0, 'a': 0, 'dmg': 0, 'cs': 0
-        # Убраны списки и duration_sec
-    }))
+    player_stats = defaultdict(lambda: defaultdict(lambda: {'games':0,'wins':0,'k':0,'d':0,'a':0,'dmg':0,'cs':0}))
 
     now_utc=datetime.now(timezone.utc); time_threshold=None
     if time_filter != "All Time":
@@ -767,8 +766,7 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     except Exception as e: st.error(f"Read err agg: {e}"); return {}, {}, pd.DataFrame(), {}
     if len(data) <= 1: st.info("No data in sheet."); return {}, {}, pd.DataFrame(), {}
 
-    header = data[0]
-    header_cleaned = [str(h).strip() if h is not None else "" for h in header]
+    header = data[0]; header_cleaned = [str(h).strip() if h is not None else "" for h in header]
     if header_cleaned != SCRIMS_HEADER: st.error("Header mismatch!"); return {}, {}, pd.DataFrame(), {}
     try: idx_map = {name: i for i, name in enumerate(header_cleaned)}
     except Exception as e: st.error(f"Map creation fail: {e}"); return {}, {}, pd.DataFrame(), {}
@@ -778,6 +776,9 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     ROLE_ORDER_FOR_SHEET = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
     role_to_abbr = {"TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUP"}
     HISTORY_DISPLAY_ORDER = ["Date", "Patch", "Blue Team Name", "B Bans", "B Picks", "R Picks", "R Bans", "Red Team Name", "Result", "Duration"]
+
+    # Переменная для хранения логов чтения KDA (чтобы не засорять основной лог)
+    kda_read_logs = []
 
     # --- Обработка строк ---
     for row_index, row in enumerate(data[1:], start=2):
@@ -799,7 +800,11 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss") # Стата сторон
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # --- СУММИРУЕМ СТАТИСТИКУ ИГРОКОВ ---
+            # Длительность (без изменений)
+            duration_str=row[idx_map.get("Duration", -1)]; duration_sec=0.0
+            if duration_str and duration_str!="N/A": try: mins, secs=map(int, duration_str.split(':')); duration_sec=float(mins*60+secs) except: pass
+
+            # Суммирование статистики игроков
             our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win")
             for role in ROLE_ORDER_FOR_SHEET:
                 role_abbr=role_to_abbr.get(role);
@@ -807,33 +812,51 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                 player_col_prefix=f"{our_side_prefix}_{role_abbr}"
                 player_name=row[idx_map.get(f"{player_col_prefix}_Player",-1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ",-1)]
 
+                # --- Чтение KDA/Dmg/CS с отладкой ---
+                k=0; d=0; a=0; dmg=0; cs=0
+                raw_k=None; raw_d=None; raw_a=None; raw_dmg=None; raw_cs=None # Для логгирования
+                log_entry_kda = [] # Собираем лог для этой роли/строки
+                try:
+                    k_col = f"{player_col_prefix}_K"; k_idx = idx_map.get(k_col, -1)
+                    raw_k = row[k_idx] if k_idx != -1 and k_idx < len(row) else 'MISSING_COL'
+                    log_entry_kda.append(f"RawK='{raw_k}'")
+                    if raw_k is not None and raw_k != '': k = int(raw_k or 0)
+                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseK_ERR:{e}")
+                try:
+                    d_col = f"{player_col_prefix}_D"; d_idx = idx_map.get(d_col, -1)
+                    raw_d = row[d_idx] if d_idx != -1 and d_idx < len(row) else 'MISSING_COL'
+                    log_entry_kda.append(f"RawD='{raw_d}'")
+                    if raw_d is not None and raw_d != '': d = int(raw_d or 0)
+                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseD_ERR:{e}")
+                try:
+                    a_col = f"{player_col_prefix}_A"; a_idx = idx_map.get(a_col, -1)
+                    raw_a = row[a_idx] if a_idx != -1 and a_idx < len(row) else 'MISSING_COL'
+                    log_entry_kda.append(f"RawA='{raw_a}'")
+                    if raw_a is not None and raw_a != '': a = int(raw_a or 0)
+                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseA_ERR:{e}")
+                try:
+                    dmg_col = f"{player_col_prefix}_Dmg"; dmg_idx = idx_map.get(dmg_col, -1)
+                    raw_dmg = row[dmg_idx] if dmg_idx != -1 and dmg_idx < len(row) else 'MISSING_COL'
+                    log_entry_kda.append(f"RawDmg='{raw_dmg}'")
+                    if raw_dmg is not None and raw_dmg != '': dmg = int(raw_dmg or 0)
+                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseDmg_ERR:{e}")
+                try:
+                    cs_col = f"{player_col_prefix}_CS"; cs_idx = idx_map.get(cs_col, -1)
+                    raw_cs = row[cs_idx] if cs_idx != -1 and cs_idx < len(row) else 'MISSING_COL'
+                    log_entry_kda.append(f"RawCS='{raw_cs}'")
+                    if raw_cs is not None and raw_cs != '': cs = int(raw_cs or 0)
+                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseCS_ERR:{e}")
+
+                # Записываем лог чтения для этой роли (если включить - будет много вывода)
+                # if player_name in relevant_player_names: # Логируем только наших
+                #     kda_read_logs.append(f"r.{row_index} {player_col_prefix}: {' | '.join(log_entry_kda)} -> Parsed(K:{k}, D:{d}, A:{a}, Dmg:{dmg}, CS:{cs})")
+
                 if player_name in relevant_player_names and champion and champion!="N/A":
-                    # Читаем KDA/Dmg/CS для этой игры
-                    k=0; d=0; a=0; dmg=0; cs=0
-                    try: k = int(row[idx_map.get(f"{player_col_prefix}_K", -1)] or 0)
-                    except: pass
-                    try: d = int(row[idx_map.get(f"{player_col_prefix}_D", -1)] or 0)
-                    except: pass
-                    try: a = int(row[idx_map.get(f"{player_col_prefix}_A", -1)] or 0)
-                    except: pass
-                    try: dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg", -1)] or 0)
-                    except: pass
-                    try: cs = int(row[idx_map.get(f"{player_col_prefix}_CS", -1)] or 0)
-                    except: pass
-
-                    # --- ДОБАВЛЯЕМ К СУММАМ ---
+                    # Суммирование K/D/A/Dmg/CS
                     stats = player_stats[player_name][champion]
-                    stats['games'] += 1
-                    stats['wins'] += is_win
-                    stats['k'] += k
-                    stats['d'] += d
-                    stats['a'] += a
-                    stats['dmg'] += dmg # Суммируем урон
-                    stats['cs'] += cs   # Суммируем CS
-                    # --- КОНЕЦ ДОБАВЛЕНИЯ К СУММАМ ---
+                    stats['games'] += 1; stats['wins'] += is_win; stats['k'] += k; stats['d'] += d; stats['a'] += a; stats['dmg'] += dmg; stats['cs'] += cs
 
-            # Подготовка строки для истории матчей (без изменений)
-            try:
+            try: # История матчей (без изменений)
                 bb_icons=[]; rb_icons=[]
                 if champion_id_map:
                     for i in range(1,6): ban_id=str(row[idx_map.get(f"Blue Ban {i} ID",-1)]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
@@ -851,6 +874,11 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             except Exception as hist_err: st.warning(f"Hist err r.{row_index}: {hist_err}"); continue
         except Exception as e_inner: st.warning(f"Proc err r.{row_index}: {e_inner}"); continue
     # --- Конец цикла for ---
+
+    # Вывод логов чтения KDA (можно закомментировать после отладки)
+    # if kda_read_logs:
+    #     st.warning("--- DEBUG: KDA/Dmg/CS Read Logs (Sample) ---")
+    #     st.text_area("KDA Read Detail", "\n".join(kda_read_logs[:50]), height=150) # Показываем первые 50 логов
 
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
     elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
@@ -870,15 +898,13 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем суммы
 # --- Конец функции aggregate_scrims_data ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Убрано дублирование заголовка) ---
+# --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (CSS v3 + Расчет Avg Dmg/CS) ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
     if st.button("⬅️ Back to HLL Stats"): st.session_state.current_page = "Hellenic Legends League Stats"; st.rerun()
 
-    champion_id_map = get_champion_data() # Получаем карту чемпионов
+    champion_id_map = get_champion_data()
 
-    # Настройка Google Sheets
     client = setup_google_sheets();
     if not client: st.error("GSheets connection failed."); return
     try: spreadsheet = client.open(SCRIMS_SHEET_NAME)
@@ -886,8 +912,8 @@ def scrims_page():
     wks = check_if_scrims_worksheet_exists(spreadsheet, SCRIMS_WORKSHEET_NAME);
     if not wks: return
 
-    # Секция обновления данных
     with st.expander("Update Scrim Data from GRID API", expanded=False):
+        # ... (код кнопки обновления без изменений) ...
         logs = [];
         if 'scrims_update_logs' not in st.session_state: st.session_state.scrims_update_logs = []
         if st.button("Download & Update Scrims", key="update_scrims_btn"):
@@ -903,14 +929,14 @@ def scrims_page():
             else: st.warning("No recent series."); log_message("No series.", logs)
         if st.session_state.scrims_update_logs: st.text_area("Logs", "\n".join(st.session_state.scrims_update_logs), height=200, key="scrim_logs")
 
+
     st.divider()
     st.subheader("Scrim Performance Analysis")
 
-    # Фильтр по времени
     time_f = st.selectbox("Filter:", ["All Time", "3 Days", "1 Week", "2 Weeks", "4 Weeks", "2 Months"], key="scrims_time_filter")
 
-    # Агрегация данных
-    blue_s, red_s, df_hist, player_stats_lists_agg = aggregate_scrims_data(wks, time_f, champion_id_map)
+    # Агрегация данных (получаем суммы KDA/Dmg/CS)
+    blue_s, red_s, df_hist, player_stats_agg = aggregate_scrims_data(wks, time_f, champion_id_map)
 
     # Отображение общей статистики
     try:
@@ -923,7 +949,6 @@ def scrims_page():
 
     st.divider()
 
-    # --- ВКЛАДКИ ---
     tab1, tab2 = st.tabs(["📜 Match History (Games)", "📊 Player Champion Stats"])
 
     with tab1: # История матчей
@@ -935,7 +960,7 @@ def scrims_page():
 
     with tab2: # Статистика игроков
         st.subheader(f"Player Champion Stats ({time_f})")
-        if not player_stats_lists_agg: st.info(f"No player stats for {time_f}.")
+        if not player_stats_agg: st.info(f"No player stats for {time_f}.")
         else:
              player_order = [PLAYER_IDS[pid] for pid in ["26433","25262","25266","20958","21922"] if pid in PLAYER_IDS]
              player_cols = st.columns(len(player_order))
@@ -947,32 +972,46 @@ def scrims_page():
                           if PLAYER_IDS.get(pid) == player_name: player_role = role; break
                      st.markdown(f"**{player_name}** ({player_role})")
 
-                     player_data_with_lists = player_stats_lists_agg.get(player_name, {})
+                     player_data_agg_sums = player_stats_agg.get(player_name, {}) # Получаем данные с суммами
                      stats_list_for_df = []
-                     sorted_champs = sorted(player_data_with_lists.items(), key=lambda item: item[1].get('games', 0), reverse=True)
+                     sorted_champs = sorted(player_data_agg_sums.items(), key=lambda item: item[1].get('games', 0), reverse=True) # Сортировка чемпов
 
                      if sorted_champs:
-                         for champ, stats_lists in sorted_champs:
-                             games = stats_lists.get('games', 0)
+                         for champ, stats_sums in sorted_champs:
+                             games = stats_sums.get('games', 0)
                              if games > 0:
-                                 wins = stats_lists.get('wins', 0); kda_values = stats_lists.get('kda_list', []); dpm_values = stats_lists.get('dpm_list', []); cspm_values = stats_lists.get('cspm_list', [])
-                                 avg_kda = sum(kda_values)/len(kda_values) if kda_values else 0.0; avg_dpm = sum(dpm_values)/len(dpm_values) if dpm_values else 0.0; avg_cspm = sum(cspm_values)/len(cspm_values) if cspm_values else 0.0
-                                 win_rate = (wins / games * 100) if games > 0 else 0
-                                 avg_kda=avg_kda if pd.notna(avg_kda) and avg_kda!=float('inf') else 0.0; avg_dpm=avg_dpm if pd.notna(avg_dpm) and avg_dpm!=float('inf') else 0.0; avg_cspm=avg_cspm if pd.notna(avg_cspm) and avg_cspm!=float('inf') else 0.0
-                                 stats_list_for_df.append({'Icon': get_champion_icon_html(champ, width=30, height=30), 'Games': games, 'WR%': win_rate, 'KDA': f"{avg_kda:.1f}", 'Avg Dmg': f"{avg_dpm:.0f}", 'Avg CS': f"{avg_cspm:.1f}" })
+                                 wins = stats_sums.get('wins', 0); k_sum = stats_sums.get('k', 0); d_sum = stats_sums.get('d', 0); a_sum = stats_sums.get('a', 0)
+                                 dmg_sum = stats_sums.get('dmg', 0); cs_sum = stats_sums.get('cs', 0)
+                                 win_rate = (wins / games * 100); kda = (k_sum + a_sum) / max(1, d_sum)
+                                 # --- ВЫЧИСЛЯЕМ СРЕДНИЕ Dmg/CS ---
+                                 avg_dmg = dmg_sum / games
+                                 avg_cs = cs_sum / games
+                                 # ---
+                                 stats_list_for_df.append({'Icon': get_champion_icon_html(champ, width=30, height=30), 'Games': games, 'WR%': win_rate, 'KDA': f"{kda:.1f}", 'Avg Dmg': f"{avg_dmg:.0f}", 'Avg CS': f"{avg_cs:.1f}" })
 
                      if stats_list_for_df:
                          df_player = pd.DataFrame(stats_list_for_df)
                          df_player['WR%'] = df_player['WR%'].apply(color_win_rate_scrims)
-                         st.markdown(""" <style>...</style> """, unsafe_allow_html=True) # Стили CSS как в пред. ответе
-
+                         # --- ВОЗВРАЩАЕМ CSS ИЗ ОТВЕТА №36 ---
+                         st.markdown("""
+                         <style>
+                         .player-stats { font-size: 0.9rem; width: 100%; margin: 5px 0; border-collapse: collapse; table-layout: fixed; }
+                         .player-stats th, .player-stats td { padding: 5px 4px; text-align: center; vertical-align: middle; border: 1px solid #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+                         .player-stats th { font-weight: 600; background-color: #262730; }
+                         .player-stats img { margin: 0 1px; vertical-align: middle; }
+                         .player-stats td:nth-child(2), .player-stats td:nth-child(4), .player-stats td:nth-child(5), .player-stats td:nth-child(6) { text-align: right; padding-right: 5px; }
+                         .player-stats td:nth-child(3) { text-align: center; }
+                         .player-stats colgroup col:nth-child(1) { width: 38px; }  /* Icon */
+                         .player-stats colgroup col:nth-child(2) { width: 45px; }  /* Games */
+                         .player-stats colgroup col:nth-child(3) { width: 60px; }  /* WR% */
+                         .player-stats colgroup col:nth-child(4) { width: 45px; }  /* KDA */
+                         .player-stats colgroup col:nth-child(5) { width: 60px; }  /* Avg Dmg */
+                         .player-stats colgroup col:nth-child(6) { width: 50px; }  /* Avg CS */
+                         </style>""", unsafe_allow_html=True)
+                         # --- КОНЕЦ ВОЗВРАЩЕНИЯ CSS ---
                          cols_html = "".join([f'<col style="width:{w}">' for w in ['38px','45px','60px','45px','60px','50px']])
                          table_html = df_player.to_html(escape=False, index=False, columns=['Icon', 'Games', 'WR%', 'KDA', 'Avg Dmg', 'Avg CS'], classes='player-stats', justify='center')
-
-                         # --- УДАЛИТЕ ЭТУ СТРОКУ ---
-                         # table_html = table_html.replace('<thead>', f'<thead><tr><th>Icon</th><th>Games</th><th>WR%</th><th>KDA</th><th>Avg Dmg</th><th>Avg CS</th></tr>', 1) # Явно задаем заголовки
-                         # --- КОНЕЦ УДАЛЕНИЯ ---
-
+                         # Убрана строка с .replace('<thead>', ...)
                          table_html = table_html.replace('<tbody>', f'<colgroup>{cols_html}</colgroup><tbody>', 1)
                          st.markdown(table_html, unsafe_allow_html=True)
                      else: st.caption("No stats.")
