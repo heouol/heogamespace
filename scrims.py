@@ -740,14 +740,12 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует Dmg/CS для расчета среднего) ---
-# @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Добавлена Отладка чтения KDA/Dmg/CS) ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ИСПРАВЛЕН СИНТАКСИС KDA/DMG/CS ОКОНЧАТЕЛЬНО) ---
 # @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные. Суммирует KDA/Dmg/CS. Добавлена отладка чтения этих значений.
+    Агрегирует данные. Исправлен синтаксис KDA/Dmg/CS (многострочный try-except v4).
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
@@ -777,9 +775,6 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     role_to_abbr = {"TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUP"}
     HISTORY_DISPLAY_ORDER = ["Date", "Patch", "Blue Team Name", "B Bans", "B Picks", "R Picks", "R Bans", "Red Team Name", "Result", "Duration"]
 
-    # Переменная для хранения логов чтения KDA (чтобы не засорять основной лог)
-    kda_read_logs = []
-
     # --- Обработка строк ---
     for row_index, row in enumerate(data[1:], start=2):
         if len(row) < len(header_cleaned): continue
@@ -800,63 +795,61 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss") # Стата сторон
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # Длительность (без изменений)
-            duration_str=row[idx_map.get("Duration", -1)]; duration_sec=0.0
-            if duration_str and duration_str!="N/A": try: mins, secs=map(int, duration_str.split(':')); duration_sec=float(mins*60+secs) except: pass
+            duration_str=row[idx_map.get("Duration", -1)]; duration_sec=0.0 # Длительность
+            duration_min_for_calc = 1
+            if duration_str and duration_str != "N/A":
+                try:
+                    mins, secs=map(int, duration_str.split(':'))
+                    if mins == 0 and secs > 0: duration_min_for_calc = 1
+                    elif mins > 0: duration_min_for_calc = max(1, mins)
+                except (ValueError, TypeError, IndexError): pass
 
-            # Суммирование статистики игроков
-            our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win")
+            our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win") # Стата игроков
             for role in ROLE_ORDER_FOR_SHEET:
                 role_abbr=role_to_abbr.get(role);
                 if not role_abbr: continue
                 player_col_prefix=f"{our_side_prefix}_{role_abbr}"
                 player_name=row[idx_map.get(f"{player_col_prefix}_Player",-1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ",-1)]
 
-                # --- Чтение KDA/Dmg/CS с отладкой ---
+                # --- ИСПРАВЛЕН СИНТАКСИС KDA/DMG/CS (v4 - Многострочный try-except) ---
                 k=0; d=0; a=0; dmg=0; cs=0
-                raw_k=None; raw_d=None; raw_a=None; raw_dmg=None; raw_cs=None # Для логгирования
-                log_entry_kda = [] # Собираем лог для этой роли/строки
                 try:
-                    k_col = f"{player_col_prefix}_K"; k_idx = idx_map.get(k_col, -1)
-                    raw_k = row[k_idx] if k_idx != -1 and k_idx < len(row) else 'MISSING_COL'
-                    log_entry_kda.append(f"RawK='{raw_k}'")
-                    if raw_k is not None and raw_k != '': k = int(raw_k or 0)
-                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseK_ERR:{e}")
-                try:
-                    d_col = f"{player_col_prefix}_D"; d_idx = idx_map.get(d_col, -1)
-                    raw_d = row[d_idx] if d_idx != -1 and d_idx < len(row) else 'MISSING_COL'
-                    log_entry_kda.append(f"RawD='{raw_d}'")
-                    if raw_d is not None and raw_d != '': d = int(raw_d or 0)
-                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseD_ERR:{e}")
-                try:
-                    a_col = f"{player_col_prefix}_A"; a_idx = idx_map.get(a_col, -1)
-                    raw_a = row[a_idx] if a_idx != -1 and a_idx < len(row) else 'MISSING_COL'
-                    log_entry_kda.append(f"RawA='{raw_a}'")
-                    if raw_a is not None and raw_a != '': a = int(raw_a or 0)
-                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseA_ERR:{e}")
-                try:
-                    dmg_col = f"{player_col_prefix}_Dmg"; dmg_idx = idx_map.get(dmg_col, -1)
-                    raw_dmg = row[dmg_idx] if dmg_idx != -1 and dmg_idx < len(row) else 'MISSING_COL'
-                    log_entry_kda.append(f"RawDmg='{raw_dmg}'")
-                    if raw_dmg is not None and raw_dmg != '': dmg = int(raw_dmg or 0)
-                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseDmg_ERR:{e}")
-                try:
-                    cs_col = f"{player_col_prefix}_CS"; cs_idx = idx_map.get(cs_col, -1)
-                    raw_cs = row[cs_idx] if cs_idx != -1 and cs_idx < len(row) else 'MISSING_COL'
-                    log_entry_kda.append(f"RawCS='{raw_cs}'")
-                    if raw_cs is not None and raw_cs != '': cs = int(raw_cs or 0)
-                except (ValueError, TypeError, IndexError) as e: log_entry_kda.append(f"ParseCS_ERR:{e}")
+                    k_val = row[idx_map.get(f"{player_col_prefix}_K", -1)]
+                    k = int(k_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass # Оставляем 0 при ошибке
 
-                # Записываем лог чтения для этой роли (если включить - будет много вывода)
-                # if player_name in relevant_player_names: # Логируем только наших
-                #     kda_read_logs.append(f"r.{row_index} {player_col_prefix}: {' | '.join(log_entry_kda)} -> Parsed(K:{k}, D:{d}, A:{a}, Dmg:{dmg}, CS:{cs})")
+                try:
+                    d_val = row[idx_map.get(f"{player_col_prefix}_D", -1)]
+                    d = int(d_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    a_val = row[idx_map.get(f"{player_col_prefix}_A", -1)]
+                    a = int(a_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    dmg_val = row[idx_map.get(f"{player_col_prefix}_Dmg", -1)]
+                    dmg = int(dmg_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    cs_val = row[idx_map.get(f"{player_col_prefix}_CS", -1)]
+                    cs = int(cs_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
                 if player_name in relevant_player_names and champion and champion!="N/A":
-                    # Суммирование K/D/A/Dmg/CS
+                    # Суммирование Dmg/CS
                     stats = player_stats[player_name][champion]
                     stats['games'] += 1; stats['wins'] += is_win; stats['k'] += k; stats['d'] += d; stats['a'] += a; stats['dmg'] += dmg; stats['cs'] += cs
 
-            try: # История матчей (без изменений)
+            try: # История матчей
                 bb_icons=[]; rb_icons=[]
                 if champion_id_map:
                     for i in range(1,6): ban_id=str(row[idx_map.get(f"Blue Ban {i} ID",-1)]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
@@ -875,29 +868,21 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
         except Exception as e_inner: st.warning(f"Proc err r.{row_index}: {e_inner}"); continue
     # --- Конец цикла for ---
 
-    # Вывод логов чтения KDA (можно закомментировать после отладки)
-    # if kda_read_logs:
-    #     st.warning("--- DEBUG: KDA/Dmg/CS Read Logs (Sample) ---")
-    #     st.text_area("KDA Read Detail", "\n".join(kda_read_logs[:50]), height=150) # Показываем первые 50 логов
-
+    # --- Постобработка и возврат (без изменений) ---
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
     elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
-
-    df_hist = pd.DataFrame(history_rows); # Постобработка истории
+    df_hist = pd.DataFrame(history_rows);
     if not df_hist.empty:
         display_cols=HISTORY_DISPLAY_ORDER if 'HISTORY_DISPLAY_ORDER' in globals() else df_hist.columns.tolist(); display_cols=[col for col in display_cols if col in df_hist.columns]; df_hist=df_hist[display_cols]
         try: df_hist['DT_temp']=pd.to_datetime(df_hist['Date'], errors='coerce', utc=True); df_hist.dropna(subset=['DT_temp'], inplace=True); df_hist=df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
         except Exception as sort_ex: st.warning(f"Hist sort fail: {sort_ex}")
-
-    final_player_stats={}; # Статистика игроков
+    final_player_stats={};
     for player, champ_data in player_stats.items():
         sorted_champs=dict(sorted(champ_data.items(), key=lambda item: item[1].get('games',0), reverse=True));
         if sorted_champs: final_player_stats[player]=sorted_champs;
     if not final_player_stats and rows_processed_after_filter>0: st.info("Games processed, no player stats.");
-
-    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем суммы
+    return blue_stats, red_stats, df_hist, final_player_stats
 # --- Конец функции aggregate_scrims_data ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (CSS v3 + Расчет Avg Dmg/CS) ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
