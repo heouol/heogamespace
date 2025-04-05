@@ -738,14 +738,12 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- Конец функции update_scrims_data ---
 # @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует KDA/Dmg/CS/Duration) ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Очистка заголовка + Логирование) ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ФИНАЛЬНОЕ ИСПРАВЛЕНИЕ СИНТАКСИСА) ---
 # @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные из Google Sheet. Очищает заголовок от пробелов перед проверкой.
-    Логирует заголовок для отладки KeyError.
+    Агрегирует данные из Google Sheet. Очищает заголовок. Исправлен синтаксис.
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
@@ -765,66 +763,38 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     if len(data) <= 1: st.info("No data in sheet."); return {}, {}, pd.DataFrame(), {}
 
     header = data[0]
-    # --- ДОБАВЛЕНА ОЧИСТКА ЗАГОЛОВКА ---
-    # Удаляем начальные/конечные пробелы из каждого элемента заголовка
-    # Преобразуем в строку на случай, если gspread вернул не строки
-    header_cleaned = [str(h).strip() if h is not None else "" for h in header]
-    # --- КОНЕЦ ОЧИСТКИ ---
+    header_cleaned = [str(h).strip() if h is not None else "" for h in header] # Очистка заголовка
 
-    # --- ОТЛАДКА: Выводим ОЧИЩЕННЫЙ заголовок ---
-    st.warning("--- DEBUG: Header Read from Sheet (Cleaned) ---")
-    st.code(f"Type: {type(header_cleaned)}\nLength: {len(header_cleaned)}\nContent:\n{header_cleaned}", language=None)
-    # --- КОНЕЦ ОТЛАДКИ ---
+    # --- Отладка заголовка (можно закомментировать после решения проблемы) ---
+    # st.warning("--- DEBUG: Header Read from Sheet (Cleaned) ---")
+    # st.code(f"Type: {type(header_cleaned)}\nLength: {len(header_cleaned)}\nContent:\n{header_cleaned}", language=None)
+    # ---
 
-    # --- ИСПОЛЬЗУЕМ ОЧИЩЕННЫЙ ЗАГОЛОВОК для сравнения ---
-    if header_cleaned != SCRIMS_HEADER:
-        st.error("Header mismatch detected (comparing cleaned sheet header vs SCRIMS_HEADER)! Cannot proceed.")
-        st.warning("--- Header Expected by Code (SCRIMS_HEADER) ---")
+    if header_cleaned != SCRIMS_HEADER: # Проверка заголовка
+        st.error("Header mismatch! Cannot proceed.")
+        st.warning("--- Header Expected (SCRIMS_HEADER) ---")
         st.code(f"Length: {len(SCRIMS_HEADER)}\nContent:\n{SCRIMS_HEADER}", language=None)
-        # Выводим разницу для облегчения поиска проблемы
-        try:
-            expected_set = set(SCRIMS_HEADER)
-            actual_set = set(header_cleaned)
-            missing_in_sheet = expected_set - actual_set
-            extra_in_sheet = actual_set - expected_set
-            if missing_in_sheet:
-                 st.warning(f"Columns MISSING in Sheet header (compared to code): {missing_in_sheet}")
-            if extra_in_sheet:
-                 st.warning(f"Columns EXTRA in Sheet header (compared to code): {extra_in_sheet}")
-            # Проверка длины еще раз
-            if len(header_cleaned) != len(SCRIMS_HEADER):
-                 st.warning(f"Length Mismatch: Sheet header has {len(header_cleaned)} columns, expected {len(SCRIMS_HEADER)}.")
+        st.warning("--- Header Read (Cleaned) ---")
+        st.code(f"Length: {len(header_cleaned)}\nContent:\n{header_cleaned}", language=None)
+        return {}, {}, pd.DataFrame(), {}
+    # else: st.info("Header check passed.") # Убрано для чистоты вывода
 
-        except Exception as diff_e:
-             st.warning(f"Could not perform detailed header diff: {diff_e}")
-
-        return {}, {}, pd.DataFrame(), {} # Останавливаем
-    else:
-        # Убираем info, если все ок
-        pass # Заголовок совпадает
-
-    try:
-        # --- ИСПОЛЬЗУЕМ ОЧИЩЕННЫЙ ЗАГОЛОВОК для создания карты ---
+    try: # Создание idx_map
         idx_map = {name: i for i, name in enumerate(header_cleaned)}
-        if "Actual_Blue_TOP" not in idx_map: # Эта проверка теперь должна точно ловить проблему, если она есть
-            st.error("CRITICAL DEBUG: 'Actual_Blue_TOP' key MISSING from idx_map AFTER cleaning!")
-            st.warning("Problematic CLEANED header was:")
-            st.code(f"{header_cleaned}", language=None)
+        if "Actual_Blue_TOP" not in idx_map:
+            st.error("CRITICAL: 'Actual_Blue_TOP' MISSING from idx_map!")
             return {}, {}, pd.DataFrame(), {}
-        # st.warning("--- DEBUG: idx_map Created ---") # Можно раскомментировать
-        # st.code(f"{idx_map}", language=None)
-
     except Exception as e: st.error(f"Map creation fail: {e}"); return {}, {}, pd.DataFrame(), {}
 
-    # --- Остальная часть функции без изменений ---
     rows_processed_after_filter = 0
     relevant_player_names = set(ROSTER_RIOT_NAME_TO_GRID_ID.keys())
     ROLE_ORDER_FOR_SHEET = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
     role_to_abbr = {"TOP": "TOP", "JUNGLE": "JGL", "MIDDLE": "MID", "BOTTOM": "BOT", "UTILITY": "SUP"}
     HISTORY_DISPLAY_ORDER = ["Date", "Patch", "Blue Team Name", "B Bans", "B Picks", "R Picks", "R Bans", "Red Team Name", "Result", "Duration"]
 
+    # --- Обработка строк ---
     for row_index, row in enumerate(data[1:], start=2):
-        if len(row) < len(header_cleaned): continue # Сравниваем с длиной очищенного заголовка
+        if len(row) < len(header_cleaned): continue
         try:
             date_str = row[idx_map["Date"]]; passes_time_filter = True # Фильтр времени
             if time_threshold and date_str != "N/A":
@@ -842,8 +812,18 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss") # Стата сторон
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            duration_str=row[idx_map["Duration"]]; duration_sec=0.0 # Длительность
-            if duration_str and duration_str!="N/A": try: mins, secs=map(int, duration_str.split(':')); duration_sec=float(mins*60+secs) except: pass
+            # --- ИСПРАВЛЕН СИНТАКСИС ПАРСИНГА ДЛИТЕЛЬНОСТИ (снова) ---
+            duration_str = row[idx_map.get("Duration", -1)] # Используем .get для безопасности
+            duration_sec = 0.0
+            if duration_str and duration_str != "N/A":
+                try:
+                    # Переносим try...except на отдельные строки
+                    mins, secs = map(int, duration_str.split(':'))
+                    duration_sec = float(mins * 60 + secs)
+                except (ValueError, TypeError, IndexError):
+                     # Игнорируем ошибки формата M:SS
+                     pass
+            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
             our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win") # Стата игроков
             for role in ROLE_ORDER_FOR_SHEET:
@@ -851,12 +831,19 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                 if not role_abbr: continue
                 player_col_prefix=f"{our_side_prefix}_{role_abbr}"
                 player_name=row[idx_map.get(f"{player_col_prefix}_Player",-1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ",-1)]
+                # --- Используем многострочные try-except для KDA/Dmg/CS ---
                 k=0; d=0; a=0; dmg=0; cs=0
-                try: k=int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0) except: pass
-                try: d=int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0) except: pass
-                try: a=int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0) except: pass
-                try: dmg=int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0) except: pass
-                try: cs=int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0) except: pass
+                try: k = int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try: d = int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try: a = int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try: dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try: cs = int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                # --- Конец многострочных try-except ---
                 if player_name in relevant_player_names and champion and champion!="N/A":
                     stats=player_stats[player_name][champion]; stats['games']+=1; stats['wins']+=is_win; stats['k']+=k; stats['d']+=d; stats['a']+=a; stats['dmg']+=dmg; stats['cs']+=cs; stats['duration_sec']+=duration_sec
 
