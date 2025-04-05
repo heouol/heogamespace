@@ -739,24 +739,19 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Усреднение по играм KDA/DPM/CSPM v2) ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ФИНАЛЬНЕЙШЕЕ ИСПРАВЛЕНИЕ СИНТАКСИСА KDA/DMG/CS) ---
 # @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные. Собирает KDA, DPM, CSPM по каждой игре в списки для усреднения.
-    Использует целое количество минут для расчета DPM/CSPM по игре.
+    Агрегирует данные. Исправлен синтаксис KDA/Dmg/CS (многострочный try-except v3).
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
 
     blue_stats={"wins":0,"losses":0,"total":0}; red_stats={"wins":0,"losses":0,"total":0}
     history_rows = []
-    # СТРУКТУРА ДЛЯ ХРАНЕНИЯ СПИСКОВ
-    player_stats = defaultdict(lambda: defaultdict(lambda: {
-        'games': 0, 'wins': 0, 'kda_list': [], 'dpm_list': [], 'cspm_list': []
-    }))
+    player_stats = defaultdict(lambda: defaultdict(lambda: {'games':0,'wins':0,'kda_list':[],'dpm_list':[],'cspm_list':[]}))
 
-    # Фильтр по времени (без изменений)
     now_utc=datetime.now(timezone.utc); time_threshold=None
     if time_filter != "All Time":
         weeks_map={"1 Week":1,"2 Weeks":2,"3 Weeks":3,"4 Weeks":4}; days_map={"3 Days":3,"10 Days":10,"2 Months":60}
@@ -767,9 +762,21 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     except Exception as e: st.error(f"Read err agg: {e}"); return {}, {}, pd.DataFrame(), {}
     if len(data) <= 1: st.info("No data in sheet."); return {}, {}, pd.DataFrame(), {}
 
-    header = data[0]; header_cleaned = [str(h).strip() if h is not None else "" for h in header]
-    if header_cleaned != SCRIMS_HEADER: st.error("Header mismatch!"); return {}, {}, pd.DataFrame(), {}
-    try: idx_map = {name: i for i, name in enumerate(header_cleaned)}
+    header = data[0]
+    header_cleaned = [str(h).strip() if h is not None else "" for h in header]
+
+    # Отладка заголовка (можно закомментировать)
+    # st.warning("--- DEBUG: Header Read from Sheet (Cleaned) ---")
+    # st.code(f"{header_cleaned}", language=None)
+
+    if header_cleaned != SCRIMS_HEADER:
+        st.error("Header mismatch! Cannot proceed."); return {}, {}, pd.DataFrame(), {}
+    # else: pass # Заголовок совпадает
+
+    try:
+        idx_map = {name: i for i, name in enumerate(header_cleaned)}
+        if "Blue_TOP_Champ" not in idx_map:
+             st.error("CRITICAL: 'Blue_TOP_Champ' MISSING from idx_map!"); return {}, {}, pd.DataFrame(), {}
     except Exception as e: st.error(f"Map creation fail: {e}"); return {}, {}, pd.DataFrame(), {}
 
     rows_processed_after_filter = 0
@@ -798,22 +805,15 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss") # Стата сторон
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # --- Получаем длительность в ЦЕЛЫХ минутах (минимум 1) ---
-            duration_str = row[idx_map.get("Duration", -1)]
-            duration_min_for_calc = 1 # Значение по умолчанию, если парсинг не удался
+            duration_str=row[idx_map.get("Duration", -1)]; duration_sec=0.0 # Длительность
+            duration_min_for_calc = 1 # По умолчанию 1 минута
             if duration_str and duration_str != "N/A":
                 try:
-                    mins, secs = map(int, duration_str.split(':'))
+                    mins, secs=map(int, duration_str.split(':'))
                     # Берем целое число минут, но не меньше 1
                     duration_min_for_calc = max(1, mins)
-                    # Если есть секунды, и минуты = 0, считаем как 1 минуту
-                    if mins == 0 and secs > 0:
-                        duration_min_for_calc = 1
-                    # Если есть секунды при ненулевых минутах, можно округлить вверх? Пока берем полные минуты.
-                    # if secs > 0: duration_min_for_calc += 1 # Округление вверх
-                except (ValueError, TypeError, IndexError):
-                    pass # Оставляем duration_min_for_calc = 1
-            # ---
+                    if mins == 0 and secs > 0: duration_min_for_calc = 1 # Если меньше минуты, считаем 1
+                except (ValueError, TypeError, IndexError): pass # Оставляем 1 при ошибке парсинга
 
             our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win") # Стата игроков
             for role in ROLE_ORDER_FOR_SHEET:
@@ -822,32 +822,49 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                 player_col_prefix=f"{our_side_prefix}_{role_abbr}"
                 player_name=row[idx_map.get(f"{player_col_prefix}_Player",-1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ",-1)]
 
+                # --- ИСПРАВЛЕН СИНТАКСИС KDA/DMG/CS (МНОГОСТРОЧНЫЙ TRY-EXCEPT v3) ---
+                k=0; d=0; a=0; dmg=0; cs=0
+                try:
+                    k_val = row[idx_map.get(f"{player_col_prefix}_K", -1)]
+                    k = int(k_val or 0) # or 0 handles None or empty string
+                except (ValueError, TypeError, IndexError):
+                    pass # Keep default 0 if conversion fails or index is bad
+
+                try:
+                    d_val = row[idx_map.get(f"{player_col_prefix}_D", -1)]
+                    d = int(d_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    a_val = row[idx_map.get(f"{player_col_prefix}_A", -1)]
+                    a = int(a_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    dmg_val = row[idx_map.get(f"{player_col_prefix}_Dmg", -1)]
+                    dmg = int(dmg_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+
+                try:
+                    cs_val = row[idx_map.get(f"{player_col_prefix}_CS", -1)]
+                    cs = int(cs_val or 0)
+                except (ValueError, TypeError, IndexError):
+                    pass
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ KDA/DMG/CS ---
+
                 if player_name in relevant_player_names and champion and champion!="N/A":
-                    k=0; d=0; a=0; dmg=0; cs=0 # Читаем KDA/Dmg/CS для этой игры
-                    try: k = int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0) except: pass
-                    try: d = int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0) except: pass
-                    try: a = int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0) except: pass
-                    try: dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0) except: pass
-                    try: cs = int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0) except: pass
+                    game_kda = (k + a) / max(1, d)
+                    game_dpm = dmg / duration_min_for_calc # Используем целые минуты (мин. 1)
+                    game_cspm = cs / duration_min_for_calc # Используем целые минуты (мин. 1)
 
-                    # --- ВЫЧИСЛЯЕМ ПОКАЗАТЕЛИ ДЛЯ ЭТОЙ ИГРЫ ---
-                    game_kda = (k + a) / max(1, d) # KDA
-                    # DPM и CSPM считаем на основе ЦЕЛЫХ МИНУТ (duration_min_for_calc)
-                    game_dpm = dmg / duration_min_for_calc
-                    game_cspm = cs / duration_min_for_calc
-                    # ---
-
-                    # --- ДОБАВЛЯЕМ В СПИСКИ ---
                     stats = player_stats[player_name][champion]
-                    stats['games'] += 1
-                    stats['wins'] += is_win
-                    stats['kda_list'].append(game_kda)
-                    stats['dpm_list'].append(game_dpm)
-                    stats['cspm_list'].append(game_cspm)
-                    # ---
+                    stats['games'] += 1; stats['wins'] += is_win
+                    stats['kda_list'].append(game_kda); stats['dpm_list'].append(game_dpm); stats['cspm_list'].append(game_cspm)
 
-            # Подготовка строки для истории матчей (без изменений)
-            try:
+            try: # История матчей (без изменений)
                 bb_icons=[]; rb_icons=[]
                 if champion_id_map:
                     for i in range(1,6): ban_id=str(row[idx_map.get(f"Blue Ban {i} ID",-1)]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
@@ -866,29 +883,21 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
         except Exception as e_inner: st.warning(f"Proc err r.{row_index}: {e_inner}"); continue
     # --- Конец цикла for ---
 
+    # --- Постобработка и возврат (без изменений) ---
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
     elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
-
-    df_hist = pd.DataFrame(history_rows); # Постобработка истории
+    df_hist = pd.DataFrame(history_rows);
     if not df_hist.empty:
         display_cols=HISTORY_DISPLAY_ORDER if 'HISTORY_DISPLAY_ORDER' in globals() else df_hist.columns.tolist(); display_cols=[col for col in display_cols if col in df_hist.columns]; df_hist=df_hist[display_cols]
         try: df_hist['DT_temp']=pd.to_datetime(df_hist['Date'], errors='coerce', utc=True); df_hist.dropna(subset=['DT_temp'], inplace=True); df_hist=df_hist.sort_values(by='DT_temp', ascending=False).drop(columns=['DT_temp'])
         except Exception as sort_ex: st.warning(f"Hist sort fail: {sort_ex}")
-
-    final_player_stats={}; # Статистика игроков
+    final_player_stats={};
     for player, champ_data in player_stats.items():
-        # Не сортируем чемпионов здесь, т.к. player_stats теперь содержит списки
-        if champ_data: # Проверяем, что есть данные по чемпиону
-             final_player_stats[player] = dict(champ_data) # Конвертируем defaultdict в dict
-
+        sorted_champs=dict(sorted(champ_data.items(), key=lambda item: item[1].get('games',0), reverse=True));
+        if sorted_champs: final_player_stats[player]=sorted_champs;
     if not final_player_stats and rows_processed_after_filter>0: st.info("Games processed, no player stats.");
-
-    return blue_stats, red_stats, df_hist, final_player_stats # Возвращаем списки
+    return blue_stats, red_stats, df_hist, final_player_stats
 # --- Конец функции aggregate_scrims_data ---
-
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Усреднение KDA/DPM/CSPM + CSS v2) ---
 def scrims_page():
     st.title(f"Scrims Analysis - {TEAM_NAME}")
