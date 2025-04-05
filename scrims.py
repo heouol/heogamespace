@@ -741,15 +741,11 @@ def update_scrims_data(worksheet, series_list, api_key, debug_logs, progress_bar
 # --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Суммирует KDA/Dmg/CS/Duration) ---
 # @st.cache_data(ttl=180)
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (ДОБАВЛЕНО ЛОГИРОВАНИЕ ЗАГОЛОВКА) ---
-# @st.cache_data(ttl=180)
-# --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
-# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Исправлен SyntaxError в длительности + Логирование заголовка) ---
+# --- ФУНКЦИЯ АГРЕГАЦИИ ДАННЫХ (Исправлен SyntaxError в KDA/Dmg/CS) ---
 # @st.cache_data(ttl=180)
 def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
     """
-    Агрегирует данные из Google Sheet. Логирует заголовок для отладки KeyError.
-    Исправлен синтаксис парсинга длительности.
+    Агрегирует данные из Google Sheet. Исправлен синтаксис KDA/Dmg/CS.
     """
     if not worksheet: st.error("Agg Err: Invalid worksheet."); return {}, {}, pd.DataFrame(), {}
     if not champion_id_map: st.warning("Agg Warn: Champ map unavailable.")
@@ -770,18 +766,18 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
 
     header = data[0]
     # --- ОТЛАДКА ЗАГОЛОВКА (ОСТАВЛЕНО) ---
-    st.warning("--- DEBUG: Header Read from Sheet ---")
-    st.code(f"Type: {type(header)}\nLength: {len(header)}\nContent:\n{header}", language=None)
+    # st.warning("--- DEBUG: Header Read from Sheet ---") # Можно раскомментировать для проверки
+    # st.code(f"Type: {type(header)}\nLength: {len(header)}\nContent:\n{header}", language=None)
     # --- КОНЕЦ ОТЛАДКИ ---
 
-    if header != SCRIMS_HEADER: # Проверка заголовка
+    if header != SCRIMS_HEADER:
         st.error("Header mismatch detected! Cannot proceed safely.")
         st.warning("--- Header Expected by Code (SCRIMS_HEADER) ---")
         st.code(f"Length: {len(SCRIMS_HEADER)}\nContent:\n{SCRIMS_HEADER}", language=None)
         return {}, {}, pd.DataFrame(), {}
-    else: pass # Заголовок совпадает
+    else: pass
 
-    try: # Создание idx_map
+    try:
         idx_map = {name: i for i, name in enumerate(header)}
         if "Actual_Blue_TOP" not in idx_map: # Доп. проверка ключа
             st.error("CRITICAL DEBUG: 'Actual_Blue_TOP' key is MISSING from idx_map!")
@@ -816,17 +812,11 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             if is_our_blue: blue_stats["total"]+=1; blue_stats["wins"]+=(result_our_team=="Win"); blue_stats["losses"]+=(result_our_team=="Loss")
             else: red_stats["total"]+=1; red_stats["wins"]+=(result_our_team=="Win"); red_stats["losses"]+=(result_our_team=="Loss")
 
-            # --- ИСПРАВЛЕН СИНТАКСИС ПАРСИНГА ДЛИТЕЛЬНОСТИ ---
+            # Длительность
             duration_str=row[idx_map["Duration"]]; duration_sec=0.0
-            if duration_str and duration_str != "N/A":
-                try:
-                    # Переносим try...except на новые строки
-                    mins, secs=map(int, duration_str.split(':'))
-                    duration_sec=float(mins*60+secs)
-                except:
-                     # Оставляем 0.0, если формат не M:SS
-                     pass
-            # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+            if duration_str and duration_str!="N/A":
+                try: mins, secs=map(int, duration_str.split(':')); duration_sec=float(mins*60+secs)
+                except: pass
 
             # Суммирование статистики игроков
             our_side_prefix="Blue" if is_our_blue else "Red"; is_win=(result_our_team=="Win")
@@ -835,11 +825,31 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                 if not role_abbr: continue
                 player_col_prefix=f"{our_side_prefix}_{role_abbr}"
                 player_name=row[idx_map.get(f"{player_col_prefix}_Player",-1)]; champion=row[idx_map.get(f"{player_col_prefix}_Champ",-1)]
-                try: k=int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0) except: k=0
-                try: d=int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0) except: d=0
-                try: a=int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0) except: a=0
-                try: dmg=int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0) except: dmg=0
-                try: cs=int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0) except: cs=0
+
+                # --- ИСПРАВЛЕН СИНТАКСИС ПАРСИНГА KDA/DMG/CS ---
+                k = 0 # Значения по умолчанию
+                d = 0
+                a = 0
+                dmg = 0
+                cs = 0
+                try:
+                    # Переносим try...except на отдельные строки
+                    k = int(row[idx_map.get(f"{player_col_prefix}_K",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass # Игнорируем ошибки парсинга, оставляем 0
+                try:
+                    d = int(row[idx_map.get(f"{player_col_prefix}_D",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try:
+                    a = int(row[idx_map.get(f"{player_col_prefix}_A",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try:
+                    dmg = int(row[idx_map.get(f"{player_col_prefix}_Dmg",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                try:
+                    cs = int(row[idx_map.get(f"{player_col_prefix}_CS",-1)] or 0)
+                except (ValueError, TypeError, IndexError): pass
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
                 if player_name in relevant_player_names and champion and champion!="N/A":
                     stats=player_stats[player_name][champion]; stats['games']+=1; stats['wins']+=is_win; stats['k']+=k; stats['d']+=d; stats['a']+=a; stats['dmg']+=dmg; stats['cs']+=cs; stats['duration_sec']+=duration_sec
 
@@ -847,19 +857,19 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
             try:
                 bb_icons=[]; rb_icons=[] # Иконки банов
                 if champion_id_map:
-                    for i in range(1,6): ban_id=str(row[idx_map[f"Blue Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id, f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
-                    for i in range(1,6): ban_id=str(row[idx_map[f"Red Ban {i} ID"]]); champ_name=champion_id_map.get(ban_id, f"ID:{ban_id}"); rb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
+                    for i in range(1,6): ban_id=str(row[idx_map.get(f"Blue Ban {i} ID",-1)]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); bb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
+                    for i in range(1,6): ban_id=str(row[idx_map.get(f"Red Ban {i} ID",-1)]); champ_name=champion_id_map.get(ban_id,f"ID:{ban_id}"); rb_icons.append(get_champion_icon_html(champ_name)) if ban_id not in ["-1","N/A"] else None
                 bb_html=" ".join(filter(None, bb_icons)); rb_html=" ".join(filter(None, rb_icons))
 
                 bp_icons=[]; rp_icons=[] # Иконки пиков
                 for role in ROLE_ORDER_FOR_SHEET:
                     role_abbr=role_to_abbr[role]
-                    b_champ=row[idx_map[f"Actual_Blue_{role_abbr}"]]; r_champ=row[idx_map[f"Actual_Red_{role_abbr}"]]
+                    b_champ=row[idx_map.get(f"Actual_Blue_{role_abbr}",-1)]; r_champ=row[idx_map.get(f"Actual_Red_{role_abbr}",-1)]
                     if b_champ not in ["N/A",None,""]: bp_icons.append(get_champion_icon_html(b_champ))
                     if r_champ not in ["N/A",None,""]: rp_icons.append(get_champion_icon_html(r_champ))
                 bp_html=" ".join(bp_icons); rp_html=" ".join(rp_icons)
 
-                patch_val=row[idx_map["Patch"]]; duration_val=row[idx_map["Duration"]]
+                patch_val=row[idx_map.get("Patch",-1)]; duration_val=row[idx_map.get("Duration",-1)]
 
                 history_rows.append({ # Формируем словарь истории
                     "Date": date_str, "Patch": patch_val, "Blue Team Name": blue_team_name,
@@ -867,7 +877,7 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
                     "R Bans": rb_html, "Red Team Name": red_team_name, "Result": result_our_team,
                     "Duration": duration_val
                 })
-            except KeyError as hist_key_err: st.error(f"HIST KEY ERROR r.{row_index}: '{hist_key_err}'. Check sheet header!"); continue
+            except KeyError as hist_key_err: st.error(f"HIST KEY ERROR r.{row_index}: '{hist_key_err}'!"); continue
             except Exception as hist_err: st.warning(f"Hist err r.{row_index}: {hist_err}"); continue
 
         except Exception as e_inner: st.warning(f"Proc err r.{row_index}: {e_inner}"); continue
@@ -875,7 +885,7 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
 
     # --- Постобработка и возврат (без изменений) ---
     if rows_processed_after_filter==0 and time_filter!="All Time": st.info(f"No data for filter: {time_filter}")
-    elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty. Check warnings/errors above.")
+    elif not history_rows and rows_processed_after_filter>0: st.warning("Games processed, history empty.")
 
     df_hist = pd.DataFrame(history_rows);
     if not df_hist.empty:
@@ -892,7 +902,6 @@ def aggregate_scrims_data(worksheet, time_filter, champion_id_map):
 
     return blue_stats, red_stats, df_hist, final_player_stats
 # --- Конец функции aggregate_scrims_data ---
-# --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Адаптирована) ---
 
 # --- ЗАМЕНИТЕ ЭТУ ФУНКЦИЮ ---
 # --- ФУНКЦИЯ ОТОБРАЖЕНИЯ СТРАНИЦЫ SCRIMS (Добавлены KDA/DPM/CSPM) ---
