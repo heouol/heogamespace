@@ -25,13 +25,9 @@ MATCH_BASIC_URL = "https://europe.api.riotgames.com/lol/match/v5/matches/{}?api_
 
 # Список URL для разных этапов турнира HLL
 TOURNAMENT_URLS = {
-    "Winter Split": {
-        "match_history": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Split/Match_History",
-        "picks_and_bans": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Split/Picks_and_Bans"
-    },
-    "Winter Playoffs": {
-        "match_history": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Playoffs/Match_History",
-        "picks_and_bans": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Winter_Playoffs/Picks_and_Bans"
+    "Spring Split": {
+        "match_history": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Spring_Split/Match_History",
+        "picks_and_bans": "https://lol.fandom.com/wiki/Hellenic_Legends_League/2025_Season/Spring_Split/Picks_and_Bans"
     }
 }
 
@@ -763,7 +759,7 @@ def load_notes_data(team_name, filename_prefix="notes_data"):
     return default_data
 
 def hll_page(selected_team):
-    st.title("Hellenic Legends League 2025 Winter - Pick & Ban Statistics")
+    st.title("Hellenic Legends League 2025 Spring - Pick & Ban Statistics")
 
     normalized_selected_team = normalize_team_name(selected_team)
 
